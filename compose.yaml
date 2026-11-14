@@ -22,7 +22,7 @@ services:
       - ./keys:/secrets:ro
       - ./secrets/.env:/secrets/.env:ro
     environment:
-      REPO_URL: https://github.com/scottmckendry/nix
+      REPO_URL: https://github.com/sm-f/nix
       BRANCH: main
       SYSTEMS: eris
       CACHIX_CACHE: scottmckendry

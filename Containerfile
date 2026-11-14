@@ -38,4 +38,10 @@ COPY --from=build /build/target/release/flakemill /usr/local/bin/flakemill
 RUN mkdir -p /nix/var/nix/profiles/per-user/root \
     && echo "build-users-group =" >> /etc/nix/nix.conf
 
-ENTRYPOINT ["/usr/local/bin/flakemill"]
+# create a seed of the nix store
+RUN mv /nix /nix.seed
+
+COPY container/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/usr/local/bin/flakemill"]

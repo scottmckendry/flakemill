@@ -20,7 +20,7 @@ fn env_or(key: &str, default: &str) -> String {
 
 pub fn load_cfg() -> Cfg {
     Cfg {
-        repo_url: env_or("REPO_URL", "https://github.com/scottmckendry/nix"),
+        repo_url: env_or("REPO_URL", "https://github.com/sm-f/nix"),
         branch: env_or("BRANCH", "main"),
         work_dir: PathBuf::from(env_or("WORK_DIR", "/var/lib/flakemill/work")),
         serve_dir: PathBuf::from(env_or("SERVE_DIR", "/var/lib/flakemill/serve")),
