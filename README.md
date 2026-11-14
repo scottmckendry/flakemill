@@ -1,0 +1,50 @@
+# flakemill
+
+An external update service for [nix flakes](https://nixos.wiki/wiki/Flakes).
+
+`flakemill` pulls the latest revision of your config repo, refreshes `flake.lock`, builds every configured system, pushes the results to a [cachix](https://cachix.org) cache, and serves a **minisign-signed** lockfile over HTTP.
+
+Hosts in the fleet then fetch the lock, verify its signature against a pinned public key, and apply it on their own schedule.
+
+The mill complements the source repo's update process but never controls it. Nothing is ever pushed back to the repo - it only ever mills and serves.
+
+## How it works
+
+On every tick (or manual trigger), flakemill runs:
+
+1. **Sync** - `git fetch` + `reset --hard` to the tip of `BRANCH`
+2. **Update** - `nix flake update --refresh`
+3. **Build** - one `nix build` per entry in `SYSTEMS`, skipping any toplevel
+   already present on the cache
+4. **Push** - publish the new toplevels to `CACHIX_CACHE`
+5. **Serve** - only if every step succeeded: atomically publish
+   `flake.lock` + minisign signature
+
+A failed build never publishes a lock, so hosts never pick up a broken fleet.
+
+## Endpoints
+
+| Path                      | Contents                                     |
+| ------------------------- | -------------------------------------------- |
+| `GET /flake.lock`         | latest published (built + pushed) lock       |
+| `GET /flake.lock.minisig` | minisign signature over the lock             |
+| `GET /manifest.json`      | status of the last run (rev, systems, error) |
+| `GET /healthz`            | liveness                                     |
+
+## Configuration
+
+All configuration is environment-based:
+
+| Variable            | Default                    | Description                                                                    |
+| ------------------- | -------------------------- | ------------------------------------------------------------------------------ |
+| `REPO_URL`          |                            | Config repo to sync and build from                                             |
+| `BRANCH`            | `main`                     | Branch to track                                                                |
+| `SYSTEMS`           |                            | Comma-separated NixOS hosts to build                                           |
+| `CACHIX_CACHE`      |                            | Cache to push build results to                                                 |
+| `CACHIX_AUTH_TOKEN` |                            | Cachix push token (`secrets/.env`)                                             |
+| `SIGN_KEY`          |                            | Path to the minisign secret key                                                |
+| `WORK_DIR`          | `/var/lib/flakemill/work`  | Repo checkout                                                                  |
+| `SERVE_DIR`         | `/var/lib/flakemill/serve` | Published lock + signature                                                     |
+| `INTERVAL_SECS`     | `21600`                    | Time between update runs                                                       |
+| `LISTEN`            | `0.0.0.0:8080`             | HTTP listen address                                                            |
+| `NIX_CONFIG`        |                            | Extra nix.conf lines, e.g. `access-tokens` for private inputs (`secrets/.env`) |
