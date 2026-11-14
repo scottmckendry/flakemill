@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/scottmckendry/flakemill/compare/v0.1.0...v0.1.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **config:** remove undocumented defaults ([b23617b](https://github.com/scottmckendry/flakemill/commit/b23617b98b49a61038bb4dc6a970e8dd7883abfc))
+* **container:** seed nix store ([5c66bfc](https://github.com/scottmckendry/flakemill/commit/5c66bfc803418091d7541f147e3b12be8390d270))
+
 ## [0.1.0](https://github.com/scottmckendry/flakemill/compare/v0.1.0...v0.1.0) (2026-11-14)
 
 
