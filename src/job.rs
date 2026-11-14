@@ -44,9 +44,17 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
         // git clone accepts an existing empty directory; create it up front
         // so current_dir(work) doesn't fail with ENOENT.
         std::fs::create_dir_all(work)?;
-        run("git", &["clone", "--branch", &cfg.branch, &cfg.repo_url, "."], work)?;
+        run(
+            "git",
+            &["clone", "--branch", &cfg.branch, &cfg.repo_url, "."],
+            work,
+        )?;
     }
-    run("git", &["reset", "--hard", &format!("origin/{}", cfg.branch)], work)?;
+    run(
+        "git",
+        &["reset", "--hard", &format!("origin/{}", cfg.branch)],
+        work,
+    )?;
     let rev = run_capture("git", &["rev-parse", "HEAD"], work)?;
 
     // 2. Update lock ----------------------------------------------------------
@@ -72,7 +80,11 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
         return Ok(());
     }
 
-    run("nix", &["flake", "update", "--flake", ".", "--refresh"], work)?;
+    run(
+        "nix",
+        &["flake", "update", "--flake", ".", "--refresh"],
+        work,
+    )?;
 
     // 3. Build every system ---------------------------------------------------
     let mut toplevels = Vec::new();
@@ -80,7 +92,18 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
         let attr = format!("nixosConfigurations.{system}.config.system.build.toplevel");
         // Plan first: skip a system whose toplevel is already on cachix.
         let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)?;
-        if run("nix", &["path-info", "--store", &format!("https://{}.cachix.org", cfg.cache_name), &out], work).is_ok() {
+        if run(
+            "nix",
+            &[
+                "path-info",
+                "--store",
+                &format!("https://{}.cachix.org", cfg.cache_name),
+                &out,
+            ],
+            work,
+        )
+        .is_ok()
+        {
             log::info!("{system}: toplevel already cached, skipping build");
         } else {
             let attr_arg = format!(".{attr}");
@@ -108,7 +131,13 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
     if let Some(key) = &cfg.sign_key {
         run(
             "minisign",
-            &["-S", "-s", key.to_str().unwrap(), "-m", published_lock.to_str().unwrap()],
+            &[
+                "-S",
+                "-s",
+                key.to_str().unwrap(),
+                "-m",
+                published_lock.to_str().unwrap(),
+            ],
             &cfg.serve_dir,
         )?;
         log::info!("published signed flake.lock at rev {rev}");
