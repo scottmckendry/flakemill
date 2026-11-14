@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/scottmckendry/flakemill/compare/v0.1.0...v0.1.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* seed /nix from image when mounted over; canonical REPO_URL ([1ffce46](https://github.com/scottmckendry/flakemill/commit/1ffce461a4d3d993be9eb9c9194c305c496d99c3))
+
 ## [0.1.0](https://github.com/scottmckendry/flakemill/compare/v0.1.0...v0.1.0) (2026-11-14)
 
 
