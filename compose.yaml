@@ -1,0 +1,39 @@
+# Repeatable local test rig for the flakemill.
+#
+#   podman compose up --build
+#   curl localhost:8080/healthz
+#   curl localhost:8080/flake.lock
+#   curl localhost:8080/manifest.json | jq
+#
+# run ./secrets/make-keys.sh to create signing keys
+
+services:
+  flakemill:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: flakemill
+    container_name: flakemill
+    ports:
+      - "8080:8080"
+    volumes:
+      - nix-store:/nix
+      - service-data:/var/lib/flakemill
+      - ./keys:/secrets:ro
+      - ./secrets/.env:/secrets/.env:ro
+    environment:
+      REPO_URL: https://github.com/scottmckendry/nix
+      BRANCH: main
+      SYSTEMS: eris
+      CACHIX_CACHE: scottmckendry
+      SIGN_KEY: /secrets/sign.key
+      INTERVAL_SECS: "300"
+    env_file:
+      - ./secrets/.env
+    privileged: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  nix-store:
+  service-data:
