@@ -2,19 +2,36 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
-use crate::cmd::{run, run_capture};
+use crate::cmd::{run, run_capture, run_probe, run_with_sink};
 use crate::config::Cfg;
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, serde::Deserialize, Default)]
 pub struct Manifest {
     pub status: String, // "ok" | "failed" | "up-to-date"
     pub revision: Option<String>,
     pub systems: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub toplevels: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<HostStat>,
     pub updated_at: String,
     pub error: Option<String>,
+}
+
+/// Per-host build outcome for the dashboard.
+#[derive(Serialize, serde::Deserialize, Clone)]
+pub struct HostStat {
+    pub name: String,
+    /// "built" | "cached" (toplevel already on cachix, build skipped)
+    pub action: String,
+    /// Filename (within /logs/) of the latest captured build output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log: Option<String>,
+    /// Wall-clock seconds the host took (eval + plan + build), rounded.
+    pub secs: u64,
 }
 
 pub fn write_manifest(serve_dir: &Path, m: &Manifest) -> Result<()> {
@@ -35,6 +52,12 @@ pub fn iso_now() -> String {
 }
 
 pub async fn run_job(cfg: &Cfg) -> Result<()> {
+    // Previous manifest, if any. Used to keep the last-known toplevels/hosts
+    // in the dashboard when a run is up-to-date or fails.
+    let prev: Option<Manifest> = std::fs::read(cfg.serve_dir.join("manifest.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
+
     // 1. Sync ---------------------------------------------------------------
     let work = &cfg.work_dir;
     std::fs::create_dir_all(&cfg.serve_dir)?;
@@ -76,12 +99,39 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
     };
     if unchanged(&lock, &published_lock) {
         log::info!("lock unchanged after update; nothing to publish");
+        // Eval-only (no builds): resolve each system's toplevel store path so
+        // the dashboard's top-level column stays populated even when the lock
+        // hasn't changed for a long time.
+        let mut toplevels = Vec::new();
+        for system in &cfg.systems {
+            let attr = format!("nixosConfigurations.{system}.config.system.build.toplevel");
+            toplevels.push(
+                run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)
+                    .map_err(|e| e.context(format!("evaluating toplevel for {system}")))?,
+            );
+        }
         write_manifest(
             &cfg.serve_dir,
             &Manifest {
                 status: "up-to-date".into(),
                 revision: Some(rev),
                 systems: cfg.systems.clone(),
+                toplevels,
+                hosts: cfg
+                    .systems
+                    .iter()
+                    .map(|s| {
+                        prev.as_ref()
+                            .and_then(|p| p.hosts.iter().find(|h| h.name == *s))
+                            .cloned()
+                            .unwrap_or(HostStat {
+                                name: s.clone(),
+                                action: "cached".into(),
+                                log: None,
+                                secs: 0,
+                            })
+                    })
+                    .collect(),
                 updated_at: iso_now(),
                 error: None,
             },
@@ -90,32 +140,74 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
     }
 
     // 3. Build every system ---------------------------------------------------
+    let logs_dir = cfg.serve_dir.join("logs");
+    std::fs::create_dir_all(&logs_dir)?;
+
     let mut toplevels = Vec::new();
+    let mut hosts = Vec::new();
     for system in &cfg.systems {
+        let host_start = std::time::Instant::now();
         let attr = format!("nixosConfigurations.{system}.config.system.build.toplevel");
         // Plan first: skip a system whose toplevel is already on cachix.
         let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)?;
-        if run(
-            "nix",
-            &[
-                "path-info",
-                "--store",
-                &format!("https://{}.cachix.org", cfg.cache_name),
-                &out,
-            ],
-            work,
-        )
-        .is_ok()
+        let log_name = format!("{system}.log");
+        let log_path = logs_dir.join(&log_name);
+        let cache_store = format!("https://{}.cachix.org", cfg.cache_name);
+        let (cached, probe_err) =
+            run_probe("nix", &["path-info", "--store", &cache_store, &out], work)?;
+        // Anything other than a clean miss (network down, bad token, nix
+        // itself broken) must not silently trigger a full rebuild.
+        if !cached
+            && !probe_err.contains("is not valid")
+            && !probe_err.contains("cannot substitute")
         {
+            bail!("cache probe for {system} failed: {probe_err}");
+        }
+        if cached {
             log::info!("{system}: toplevel already cached, skipping build");
+            let _ = std::fs::write(
+                &log_path,
+                format!("# {system}: toplevel already on cachix, build skipped\n{out}\n"),
+            );
+            hosts.push(HostStat {
+                name: system.clone(),
+                action: "cached".into(),
+                log: Some(log_name),
+                secs: host_start.elapsed().as_secs(),
+            });
         } else {
-            let attr_arg = format!(".{attr}");
-            run(
+            let mut log_file = std::fs::File::create(&log_path).ok();
+            let mut sink = |stream: &str, line: &str| {
+                if let Some(f) = log_file.as_mut() {
+                    use std::io::Write;
+                    let _ = writeln!(f, "[{stream}] {line}");
+                }
+            };
+            // Every line has already been teed to the log file by the sink,
+            // so an error here only needs the timing context re-attached.
+            run_with_sink(
                 "nix",
-                &["build", &attr_arg, "--no-link", "--print-build-logs"],
+                &[
+                    "build",
+                    &format!(".#{attr}"),
+                    "--no-link",
+                    "--print-build-logs",
+                ],
                 work,
+                Some(&mut sink),
             )
-            .map_err(|e| e.context(format!("building {system}")))?;
+            .map_err(|e| {
+                e.context(format!(
+                    "building {system} (failed after {}s)",
+                    host_start.elapsed().as_secs()
+                ))
+            })?;
+            hosts.push(HostStat {
+                name: system.clone(),
+                action: "built".into(),
+                log: Some(log_name),
+                secs: host_start.elapsed().as_secs(),
+            });
         }
         toplevels.push(out);
     }
@@ -154,6 +246,8 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
             status: "ok".into(),
             revision: Some(rev),
             systems: cfg.systems.clone(),
+            toplevels,
+            hosts,
             updated_at: iso_now(),
             error: None,
         },

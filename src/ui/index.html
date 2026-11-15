@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>flakemill</title>
+    <style>
+      :root {
+        --bg: #16181a;
+        --bg-alt: #1e2124;
+        --bg-hl: #3c4048;
+        --fg: #ffffff;
+        --grey: #7b8496;
+        --blue: #5ea1ff;
+        --green: #5eff6c;
+        --cyan: #5ef1ff;
+        --red: #ff6e5e;
+        --yellow: #f1ff5e;
+        --magenta: #ff5ef1;
+        --orange: #ffbd5e;
+        --border: #3c4048;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #ffffff;
+          --bg-alt: #eaeaea;
+          --bg-hl: #acacac;
+          --fg: #16181a;
+          --blue: #0057d1;
+          --green: #008b0c;
+          --cyan: #008c99;
+          --red: #d11500;
+          --yellow: #997b00;
+          --magenta: #d100bf;
+          --orange: #d17c00;
+          --border: #acacac;
+        }
+      }
+      * {
+        box-sizing: border-box;
+        border: 0;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+          Consolas, monospace;
+        line-height: 1.6;
+        max-width: 64rem;
+        margin: 0 auto;
+        padding: 2rem 1.25rem 4rem;
+      }
+      a {
+        color: var(--cyan);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      a:hover {
+        color: var(--blue);
+      }
+      h1 {
+        color: var(--orange);
+        font-size: 1.5rem;
+      }
+      h1::before {
+        content: "# ";
+        color: var(--grey);
+      }
+      h2 {
+        color: var(--cyan);
+        font-size: 1.1rem;
+        margin: 2rem 0 0.75rem;
+      }
+      h2::before {
+        content: "## ";
+        color: var(--grey);
+      }
+      .sub {
+        color: var(--grey);
+        margin: 0.25rem 0 2rem;
+      }
+      .card {
+        background: var(--bg-alt);
+        border: 1px solid var(--border);
+        padding: 1rem 1.25rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+        gap: 1rem;
+      }
+      .label {
+        color: var(--grey);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .value {
+        color: var(--fg);
+        font-size: 1.05rem;
+        overflow-wrap: anywhere;
+      }
+      .value.blue { color: var(--blue); }
+      .value.cyan { color: var(--cyan); }
+      .value.orange { color: var(--orange); }
+      .countdown {
+        font-size: 2rem;
+        font-variant-numeric: tabular-nums;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--border);
+        padding: 0.4rem 0.5rem;
+        text-align: left;
+        font-size: 0.9rem;
+      }
+      th {
+        color: var(--grey);
+        font-weight: normal;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .status {
+        display: inline-block;
+        padding: 0.05rem 0.5rem;
+        font-weight: bold;
+      }
+      .status-ok,
+      .status-up-to-date { color: var(--green); }
+      .status-failed { color: var(--red); }
+      .status-running { color: var(--yellow); }
+      .status-idle,
+      .status-unknown { color: var(--grey); }
+      .status-ok::before { content: "[ ok ]"; }
+      .status-up-to-date::before { content: "[ up-to-date ]"; }
+      .status-failed::before { content: "[ failed ]"; }
+      .status-running::before { content: "[ running ]"; }
+      .status-idle::before { content: "[ idle ]"; }
+      .status-unknown::before { content: "[ … ]"; }
+      .dot {
+        display: inline-block;
+        width: 0.6em;
+        height: 0.6em;
+        border-radius: 50%;
+        margin-right: 0.4em;
+        vertical-align: baseline;
+      }
+      .dot-ok { background: var(--green); }
+      .dot-failed { background: var(--red); }
+      .dot-idle { background: var(--grey); }
+      .log-link {
+        color: var(--cyan);
+        font-size: 0.72rem;
+        margin-left: 0.5em;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 0.72rem;
+        padding: 0 0.4rem;
+        margin-right: 0.4em;
+        font-weight: bold;
+      }
+      .tag-built { color: var(--bg); background: var(--orange); }
+      .tag-cached { color: var(--bg); background: var(--green); }
+      .error {
+        background: var(--bg-alt);
+        border: 1px solid var(--red);
+        color: var(--red);
+        padding: 1rem 1.25rem;
+        margin-top: 1rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .error::before {
+        content: "! ";
+      }
+      footer {
+        color: var(--grey);
+        margin-top: 3rem;
+        font-size: 0.8rem;
+      }
+      footer::before {
+        content: "~ ";
+        color: var(--grey);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>flakemill</h1>
+    <p class="sub">
+      external update service for nix flakes &mdash;
+      <a href="/manifest.json">manifest.json</a> &middot;
+      <a href="/flake.lock">flake.lock</a> &middot;
+      <a href="/healthz">healthz</a>
+    </p>
+
+    <h2>status</h2>
+    <div class="card" style="margin-bottom: 1rem">
+      <span class="label">last run</span><br />
+      <span id="status" class="status status-unknown"></span>
+      <span id="last-run-detail" class="value" style="color: var(--grey)"></span>
+    </div>
+    <div id="error-box" class="error" style="display: none"></div>
+
+    <div class="grid" style="margin-top: 1rem">
+      <div class="card">
+        <span class="label">next run</span><br />
+        <span id="countdown" class="value countdown blue">&ndash;&ndash;:--:--</span><br />
+        <span id="next-run-at" class="label"></span>
+      </div>
+      <div class="card">
+        <span class="label">health</span><br />
+        <span id="health" class="value"><span class="dot dot-idle"></span>unknown</span><br />
+        <span id="serving" class="label"></span>
+      </div>
+    </div>
+
+    <h2>fleet</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>host</th><th>output</th><th>last build</th></tr>
+        </thead>
+        <tbody id="systems"><tr><td colspan="3" style="color: var(--grey)">loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h2>source</h2>
+    <div class="card" style="margin-bottom: 1rem">
+      <table>
+        <tbody id="source"></tbody>
+      </table>
+    </div>
+
+    <footer>read-only dashboard &middot; refreshed every 15s</footer>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const epoch = (s) =>
+        s ? new Date(Number(s) * 1000).toLocaleString() : "\u2014";
+      const short = (s) => (s ? s.slice(0, 10) : "\u2014");
+      const ago = (s) => {
+        if (!s) return "";
+        const d = Date.now() / 1000 - Number(s);
+        if (d < 0) return "";
+        const h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60);
+        if (h > 0) return ` · ${h}h${m}m ago`;
+        if (m > 0) return ` · ${m}m ago`;
+        return ` · just now`;
+      };
+      const hms = (s) => {
+        if (s <= 0) return "00:00:00";
+        const h = Math.floor(s / 3600),
+          m = Math.floor((s % 3600) / 60),
+          sec = Math.floor(s % 60);
+        const p = (n) => String(n).padStart(2, "0");
+        return `${p(h)}:${p(m)}:${p(sec)}`;
+      };
+
+      let nextRunAt = null;
+      let running = false;
+
+      function render(d) {
+        nextRunAt = d.next_run_at ? Number(d.next_run_at) : null;
+        running = !!d.running;
+
+        const m = d.manifest || {};
+        if (d.running) m.status = "running";
+        const cls = `status-${m.status || "unknown"}`;
+        $("status").className = "status " + cls;
+        $("last-run-detail").textContent =
+          (m.revision ? ` · ${short(m.revision)}` : "") + ago(m.updated_at);
+
+        const err = $("error-box");
+        if (m.error) {
+          err.style.display = "block";
+          err.textContent = m.error;
+        } else err.style.display = "none";
+
+        $("health").innerHTML = m.status === "failed"
+          ? '<span class="dot dot-failed"></span>degraded'
+          : m.status
+            ? '<span class="dot dot-ok"></span>healthy'
+            : '<span class="dot dot-idle"></span>no runs yet';
+        $("serving").textContent = d.serving
+          ? "signed lock is being served"
+          : "no lock published yet";
+
+        $("next-run-at").textContent = d.next_run_at
+          ? "at " + epoch(d.next_run_at)
+          : "";
+        const interval = d.interval_secs;
+        $("source").innerHTML = [
+          ["repo", d.repo_url || "\u2014"],
+          ["branch", d.branch || "\u2014"],
+          ["cachix", d.cachix_cache || "\u2014"],
+          ["interval", interval ? `${Math.round(interval / 60)} min` : "\u2014"],
+          ["uptime", d.uptime_secs ? hms(Number(d.uptime_secs)) : "\u2014"],
+        ]
+          .map(
+            ([k, v]) =>
+              `<tr><td class="label" style="border:0">${k}</td><td class="value cyan" style="border:0">${v}</td></tr>`,
+          )
+          .join("");
+
+        const sys = m.systems || [];
+        const outs = m.toplevels || [];
+        const hostStats = {};
+        (m.hosts || []).forEach((h) => (hostStats[h.name] = h));
+        const dur = (s) => {
+          if (s == null) return "";
+          s = Number(s);
+          return s >= 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s}s`;
+        };
+        const outName = (o) =>
+          o ? (o.split('/').pop() || "").replace(/^\w+-/, "") : "";
+        const cell = (h) => {
+          if (!h) return '<span style="color: var(--grey)">&mdash;</span>';
+          const log = h.log
+            ? ` <a class="log-link" href="/logs/${h.log}">log</a>`
+            : "";
+          return `<span class="tag tag-${h.action}">${h.action}</span>${
+            h.action === "cached" && !h.secs ? "" : dur(h.secs)
+          }${log}`;
+        };
+        $("systems").innerHTML = sys.length
+          ? sys
+              .map(
+                (s, i) =>
+                  `<tr><td class="value blue">${s}</td><td style="color: var(--grey)">${
+                    outName(outs[i]) || "\u2014"
+                  }</td><td>${cell(hostStats[s])}</td></tr>`,
+              )
+              .join("")
+          : '<tr><td colspan="3" style="color: var(--grey)">no systems configured</td></tr>';
+      }
+
+      function tick() {
+        if (nextRunAt) {
+          const remain = nextRunAt - Date.now() / 1000;
+          const busy = running;
+          $("countdown").textContent = busy
+            ? "running…"
+            : remain > 0
+              ? hms(remain)
+              : "starting…";
+          $("countdown").style.color = busy
+            ? "var(--yellow)"
+            : remain > 0
+              ? "var(--blue)"
+              : "var(--grey)";
+        }
+      }
+
+      async function refresh() {
+        try {
+          const r = await fetch("/ui.json");
+          if (r.ok) render(await r.json());
+        } catch {}
+      }
+
+      refresh();
+      setInterval(refresh, 15000);
+      setInterval(tick, 1000);
+    </script>
+  </body>
+</html>

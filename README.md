@@ -29,6 +29,7 @@ A failed build never publishes a lock, so hosts never pick up a broken fleet.
 | `GET /flake.lock`         | latest published (built + pushed) lock       |
 | `GET /flake.lock.minisig` | minisign signature over the lock             |
 | `GET /manifest.json`      | status of the last run (rev, systems, error) |
+| `GET /logs/{host}.log`    | latest captured build log for a system       |
 | `GET /healthz`            | liveness                                     |
 
 ## Configuration
