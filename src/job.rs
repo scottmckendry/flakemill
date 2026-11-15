@@ -60,13 +60,22 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
     // 2. Update lock ----------------------------------------------------------
     let lock = work.join("flake.lock");
     let published_lock = cfg.serve_dir.join("flake.lock");
+    run(
+        "nix",
+        &["flake", "update", "--flake", ".", "--refresh"],
+        work,
+    )?;
+
+    // Compare the *updated* lock against the last published one. The committed
+    // lock in the repo may be identical to what we published even when upstream
+    // inputs have moved, so the check must run after the refresh, not before.
     let unchanged = |a: &Path, b: &Path| {
         a.exists()
             && b.exists()
             && std::fs::read(a).is_ok_and(|x| std::fs::read(b).is_ok_and(|y| x == y))
     };
     if unchanged(&lock, &published_lock) {
-        log::info!("lock unchanged since last publish; nothing to do");
+        log::info!("lock unchanged after update; nothing to publish");
         write_manifest(
             &cfg.serve_dir,
             &Manifest {
@@ -79,12 +88,6 @@ pub async fn run_job(cfg: &Cfg) -> Result<()> {
         )?;
         return Ok(());
     }
-
-    run(
-        "nix",
-        &["flake", "update", "--flake", ".", "--refresh"],
-        work,
-    )?;
 
     // 3. Build every system ---------------------------------------------------
     let mut toplevels = Vec::new();
