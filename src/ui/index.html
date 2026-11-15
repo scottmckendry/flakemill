@@ -249,6 +249,18 @@
       const epoch = (s) =>
         s ? new Date(Number(s) * 1000).toLocaleString() : "\u2014";
       const short = (s) => (s ? s.slice(0, 10) : "\u2014");
+      const esc = (v) =>
+        String(v ?? "").replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
       const ago = (s) => {
         if (!s) return "";
         const d = Date.now() / 1000 - Number(s);
@@ -275,9 +287,13 @@
         running = !!d.running;
 
         const m = d.manifest || {};
-        if (d.running) m.status = "running";
-        const cls = `status-${m.status || "unknown"}`;
-        $("status").className = "status " + cls;
+        const known = ["ok", "failed", "up-to-date", "unknown"];
+        const status = d.running
+          ? "running"
+          : known.includes(m.status)
+            ? m.status
+            : "unknown";
+        $("status").className = `status status-${status}`;
         $("last-run-detail").textContent =
           (m.revision ? ` · ${short(m.revision)}` : "") + ago(m.updated_at);
 
@@ -287,13 +303,16 @@
           err.textContent = m.error;
         } else err.style.display = "none";
 
-        $("health").innerHTML = m.status === "failed"
-          ? '<span class="dot dot-failed"></span>degraded'
-          : m.status
-            ? '<span class="dot dot-ok"></span>healthy'
-            : '<span class="dot dot-idle"></span>no runs yet';
+        $("health").innerHTML =
+          status === "failed"
+            ? '<span class="dot dot-failed"></span>degraded'
+            : status === "unknown"
+              ? '<span class="dot dot-idle"></span>no runs yet'
+              : '<span class="dot dot-ok"></span>healthy';
         $("serving").textContent = d.serving
-          ? "signed lock is being served"
+          ? d.signed
+            ? "signed lock is being served"
+            : "lock is being served without a signature"
           : "no lock published yet";
 
         $("next-run-at").textContent = d.next_run_at
@@ -309,7 +328,7 @@
         ]
           .map(
             ([k, v]) =>
-              `<tr><td class="label" style="border:0">${k}</td><td class="value cyan" style="border:0">${v}</td></tr>`,
+              `<tr><td class="label" style="border:0">${esc(k)}</td><td class="value cyan" style="border:0">${esc(v)}</td></tr>`,
           )
           .join("");
 
@@ -326,10 +345,11 @@
           o ? (o.split('/').pop() || "").replace(/^\w+-/, "") : "";
         const cell = (h) => {
           if (!h) return '<span style="color: var(--grey)">&mdash;</span>';
+          const action = esc(h.action);
           const log = h.log
-            ? ` <a class="log-link" href="/logs/${h.log}">log</a>`
+            ? ` <a class="log-link" href="/logs/${encodeURIComponent(h.log)}">log</a>`
             : "";
-          return `<span class="tag tag-${h.action}">${h.action}</span>${
+          return `<span class="tag tag-${action}">${action}</span>${
             h.action === "cached" && !h.secs ? "" : dur(h.secs)
           }${log}`;
         };
@@ -337,8 +357,8 @@
           ? sys
               .map(
                 (s, i) =>
-                  `<tr><td class="value blue">${s}</td><td style="color: var(--grey)">${
-                    outName(outs[i]) || "\u2014"
+                  `<tr><td class="value blue">${esc(s)}</td><td style="color: var(--grey)">${
+                    esc(outName(outs[i])) || "\u2014"
                   }</td><td>${cell(hostStats[s])}</td></tr>`,
               )
               .join("")

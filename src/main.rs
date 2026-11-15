@@ -8,12 +8,14 @@ mod cmd;
 mod config;
 mod job;
 mod server;
+#[cfg(test)]
+mod test_support;
 mod ui;
 
 use anyhow::Result;
 
 use config::load_cfg;
-use job::{iso_now, run_job, write_manifest, Manifest};
+use job::{record_failure, run_job, unix_now};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,7 +26,7 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| EnvFilter::new("info,tower_http=debug")),
         )
         .init();
-    let cfg = load_cfg();
+    let cfg = load_cfg()?;
     std::fs::create_dir_all(&cfg.serve_dir)?;
 
     let addr = std::env::var("LISTEN").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
@@ -36,34 +38,33 @@ async fn main() -> Result<()> {
         async move {
             loop {
                 ui.set_running(true);
-                if let Err(e) = run_job(&cfg).await {
-                    ui.set_running(false);
-                    log::error!("update job failed: {e:#}");
-                    // Keep the previous manifest's toplevels/hosts so the
-                    // dashboard shows last-known-good info alongside the error.
-                    let prev: Option<crate::job::Manifest> =
-                        std::fs::read(cfg.serve_dir.join("manifest.json"))
-                            .ok()
-                            .and_then(|b| serde_json::from_slice(&b).ok());
-                    let _ = write_manifest(
-                        &cfg.serve_dir,
-                        &Manifest {
-                            status: "failed".into(),
-                            revision: prev.as_ref().and_then(|p| p.revision.clone()),
-                            systems: prev.as_ref().map(|p| p.systems.clone()).unwrap_or_default(),
-                            toplevels: prev
-                                .as_ref()
-                                .map(|p| p.toplevels.clone())
-                                .unwrap_or_default(),
-                            hosts: prev.as_ref().map(|p| p.hosts.clone()).unwrap_or_default(),
-                            updated_at: iso_now(),
-                            error: Some(format!("{e:#}")),
-                        },
-                    );
+
+                // The pipeline shells out to git/nix/cachix, so keep all of
+                // that blocking work off the async runtime's worker threads.
+                let job_cfg = cfg.clone();
+                match tokio::task::spawn_blocking(move || run_job(&job_cfg)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        log::error!("update job failed: {e:#}");
+                        if let Err(record_err) = record_failure(&cfg.serve_dir, format!("{e:#}")) {
+                            log::error!("recording failed manifest: {record_err:#}");
+                        }
+                    }
+                    Err(join_err) => {
+                        let message = if join_err.is_panic() {
+                            format!("update job panicked: {join_err}")
+                        } else {
+                            format!("update job was cancelled: {join_err}")
+                        };
+                        log::error!("{message}");
+                        if let Err(record_err) = record_failure(&cfg.serve_dir, message) {
+                            log::error!("recording failed manifest: {record_err:#}");
+                        }
+                    }
                 }
+
                 ui.set_running(false);
-                let now: u64 = iso_now().parse().unwrap_or(0);
-                ui.set_next_run_at(now + cfg.interval.as_secs());
+                ui.set_next_run_at(unix_now().saturating_add(cfg.interval.as_secs()));
                 tokio::time::sleep(cfg.interval).await;
             }
         }

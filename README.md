@@ -26,6 +26,8 @@ A failed build never publishes a lock, so hosts never pick up a broken fleet.
 
 | Path                      | Contents                                     |
 | ------------------------- | -------------------------------------------- |
+| `GET /`                   | read-only fleet dashboard                    |
+| `GET /ui.json`            | dashboard data (manifest + runtime state)    |
 | `GET /flake.lock`         | latest published (built + pushed) lock       |
 | `GET /flake.lock.minisig` | minisign signature over the lock             |
 | `GET /manifest.json`      | status of the last run (rev, systems, error) |
@@ -43,9 +45,9 @@ All configuration is environment-based:
 | `SYSTEMS`           |                            | Comma-separated NixOS hosts to build                                           |
 | `CACHIX_CACHE`      |                            | Cache to push build results to                                                 |
 | `CACHIX_AUTH_TOKEN` |                            | Cachix push token (`secrets/.env`)                                             |
-| `SIGN_KEY`          |                            | Path to the minisign secret key                                                |
+| `SIGN_KEY`          |                            | Path to the minisign secret key (unset publishes unsigned locks)               |
 | `WORK_DIR`          | `/var/lib/flakemill/work`  | Repo checkout                                                                  |
 | `SERVE_DIR`         | `/var/lib/flakemill/serve` | Published lock + signature                                                     |
-| `INTERVAL_SECS`     | `21600`                    | Time between update runs                                                       |
+| `INTERVAL_SECS`     | `21600`                    | Seconds between update runs (must be greater than zero)                         |
 | `LISTEN`            | `0.0.0.0:8080`             | HTTP listen address                                                            |
 | `NIX_CONFIG`        |                            | Extra nix.conf lines, e.g. `access-tokens` for private inputs (`secrets/.env`) |
