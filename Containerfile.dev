@@ -27,12 +27,15 @@ RUN mv /nix /nix.seed
 WORKDIR /build
 COPY Cargo.toml Cargo.lock* ./
 RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && cargo build && rm -rf src
-RUN cargo install cargo-watch
+RUN cargo install cargo-watch sccache
+
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/build/sccache
 
 # source is bind-mounted at runtime; seed it so the image is self-contained too
 COPY src ./src
 
-RUN cargo clean -p flakemill
+RUN cargo clean -p flakemill && sccache --stop-server
 
 COPY container/entrypoint.sh /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

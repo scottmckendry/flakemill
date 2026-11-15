@@ -23,6 +23,8 @@ services:
       - ./src:/build/src
       - ./Cargo.toml:/build/Cargo.toml
       - ./Cargo.lock:/build/Cargo.lock
+      - flakemill-target:/build/target
+      - flakemill-sccache:/build/sccache
       - nix-store:/nix
       - service-data:/var/lib/flakemill
       - ./keys:/secrets:ro
@@ -43,3 +45,5 @@ services:
 volumes:
   nix-store:
   service-data:
+  flakemill-target:
+  flakemill-sccache:

@@ -87,7 +87,7 @@ pub fn build_router(serve_dir: &std::path::Path, cfg: &Cfg, ui: UiState) -> axum
             axum::routing::get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-                    index_html().to_string(),
+                    index_html(),
                 )
             }),
         )

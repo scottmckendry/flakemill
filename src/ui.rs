@@ -104,8 +104,20 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
     .expect("UiJson serialization cannot fail")
 }
 
-pub fn index_html() -> &'static str {
-    include_str!("ui/index.html")
+/// Embedded dashboard HTML for release builds.
+const EMBEDDED_INDEX_HTML: &str = include_str!("ui/index.html");
+
+/// In debug builds the dashboard is served from disk so HTML/CSS/JS edits
+/// show up on browser refresh without recompiling. Release builds embed it.
+pub fn index_html() -> String {
+    #[cfg(debug_assertions)]
+    {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/index.html");
+        if let Ok(html) = std::fs::read_to_string(path) {
+            return html;
+        }
+    }
+    EMBEDDED_INDEX_HTML.to_string()
 }
 
 #[cfg(test)]
