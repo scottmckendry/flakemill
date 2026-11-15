@@ -112,10 +112,14 @@
       .value.orange {
         color: var(--orange);
       }
-      .countdown {
-        font-size: 2rem;
-        font-variant-numeric: tabular-nums;
+      .status-card {
+        display: grid;
+        grid-template-rows: auto 1.8rem auto;
+        align-items: center;
+        gap: 0.25rem;
       }
+      .status-card .value { font-size: 1.1rem; }
+      .countdown { font-variant-numeric: tabular-nums; }
       table {
         width: 100%;
         border-collapse: collapse;
@@ -211,18 +215,16 @@
         color: var(--bg);
         background: var(--green);
       }
-      .error {
-        background: var(--bg-alt);
-        border: 1px solid var(--red);
-        color: var(--red);
-        padding: 1rem 1.25rem;
-        margin-top: 1rem;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      .error::before {
-        content: "! ";
-      }
+      .muted { color: var(--grey); }
+      .failure-title { color: var(--red); font-weight: bold; }
+      .failure-log { display: inline-block; margin: 0.25rem 0; }
+      #error-box { margin-top: 0.5rem; }
+      .table-wrap { overflow-x: auto; }
+      .attempt-cell { white-space: nowrap; }
+      #live-log-link { color: var(--blue); text-decoration: none; text-transform: none; }
+      #live-log-link:hover { color: var(--cyan); }
+      #refresh-state { color: var(--grey); }
+      #refresh-state.stale { color: var(--red); }
       footer {
         color: var(--grey);
         margin-top: 3rem;
@@ -258,39 +260,40 @@
         class="value"
         style="color: var(--grey)"
       ></span>
+      <div id="error-box" style="display: none">
+        <span id="failure-title"></span>
+        <span id="failure-link"></span>
+        <div id="failure-message" class="muted"></div>
+      </div>
     </div>
-    <div id="error-box" class="error" style="display: none"></div>
 
     <div class="grid" style="margin-top: 1rem">
-      <div class="card">
-        <span class="label">next run</span><br />
-        <span id="countdown" class="value countdown blue"
-          >&ndash;&ndash;:--:--</span
-        ><br />
-        <span id="next-run-at" class="label"></span>
+      <div class="card status-card">
+        <span id="schedule-label" class="label">next run</span>
+        <span id="countdown" class="value countdown blue">&mdash;</span>
+        <span><span id="next-run-at" class="label"></span><a id="live-log-link" class="label" target="_blank" rel="noopener noreferrer" hidden>view logs ↗</a></span>
       </div>
-      <div class="card">
-        <span class="label">health</span><br />
-        <span id="health" class="value"
-          ><span class="dot dot-idle"></span>unknown</span
-        ><br />
+      <div class="card status-card">
+        <span class="label">published lock</span>
+        <span id="health" class="value"><span class="dot dot-idle"></span>unknown</span>
         <span id="serving" class="label"></span>
       </div>
     </div>
 
     <h2>fleet</h2>
-    <div class="card">
+    <div class="card table-wrap">
       <table>
         <thead>
           <tr>
             <th>host</th>
-            <th>output</th>
-            <th>last build</th>
+            <th>latest attempt</th>
+            <th title="Output from the last successful publication">published output</th>
+            <th title="Build details from the last successful publication">published build</th>
           </tr>
         </thead>
         <tbody id="systems">
           <tr>
-            <td colspan="3" style="color: var(--grey)">loading…</td>
+            <td colspan="4" style="color: var(--grey)">loading…</td>
           </tr>
         </tbody>
       </table>
@@ -304,7 +307,7 @@
     </div>
 
     <footer>
-      read-only dashboard &middot; refreshed every 15s &middot;
+      read-only dashboard &middot; <span id="refresh-state">connecting…</span> &middot;
       <a id="source-link" target="_blank" rel="noopener noreferrer">github</a>
       <span id="build-version"></span>
     </footer>
@@ -355,43 +358,51 @@
 
       let nextRunAt = null;
       let running = false;
+      let lastRefresh = null;
+      let uptimeSample = null;
+      const logLink = (name, label) => `<a class="failure-log" href="/logs/${encodeURIComponent(name)}">${esc(label)}</a>`;
 
       function render(d) {
         nextRunAt = d.next_run_at ? Number(d.next_run_at) : null;
         running = !!d.running;
+        uptimeSample = d.uptime_secs == null ? null : { seconds: Number(d.uptime_secs), at: performance.now() };
+        const activeBuild = running ? d.active_build : null;
+        $("live-log-link").hidden = !activeBuild;
+        if (activeBuild) {
+          const params = new URLSearchParams({ log: activeBuild.log, host: activeBuild.host });
+          $("live-log-link").href = `/live-log?${params}`;
+        }
 
         const m = d.manifest || {};
         const known = ["ok", "failed", "up-to-date", "unknown"];
-        const status = d.running
-          ? "running"
-          : known.includes(m.status)
-            ? m.status
-            : "unknown";
+        const status = known.includes(m.status) ? m.status : "unknown";
         $("status").className = `status status-${status}`;
         $("last-run-detail").textContent =
-          (m.revision ? ` · ${short(m.revision)}` : "") + ago(m.updated_at);
+          (m.updated_at ? ` · ${epoch(m.updated_at)}` : "") + ago(m.updated_at);
 
         const err = $("error-box");
-        if (m.error) {
+        const failure = m.status === "failed" ? m.failure : null;
+        if (m.status === "failed") {
           err.style.display = "block";
-          err.textContent = m.error;
-        } else err.style.display = "none";
+          $("failure-title").textContent = failure ? `${failure.stage} · ${failure.host}` : "Affected host unknown";
+          $("failure-link").innerHTML = failure?.log ? ` · ${logLink(failure.log, "View failure log →")}` : ' · <span class="muted">No failure log available</span>';
+          $("failure-message").textContent = failure?.log ? "" : (m.error || "");
+        } else { err.style.display = "none"; }
 
-        $("health").innerHTML =
-          status === "failed"
-            ? '<span class="dot dot-failed"></span>degraded'
-            : status === "unknown"
-              ? '<span class="dot dot-idle"></span>no runs yet'
-              : '<span class="dot dot-ok"></span>healthy';
+        $("health").innerHTML = d.serving
+          ? '<span class="dot dot-ok"></span>available'
+          : '<span class="dot dot-idle"></span>not published';
         $("serving").textContent = d.serving
           ? d.signed
-            ? "signed lock is being served"
-            : "lock is being served without a signature"
+            ? `signed${m.revision ? ` · revision ${short(m.revision)}` : ""}${m.status === "failed" ? " · last successful" : ""}`
+            : `unsigned${m.revision ? ` · revision ${short(m.revision)}` : ""}${m.status === "failed" ? " · last successful" : ""}`
           : "no lock published yet";
 
-        $("next-run-at").textContent = d.next_run_at
+        $("schedule-label").textContent = running ? "current run" : "next run";
+        $("next-run-at").textContent = !running && d.next_run_at
           ? "at " + epoch(d.next_run_at)
           : "";
+        tick();
         const interval = d.interval_secs;
         const rows = [
           {
@@ -408,7 +419,7 @@
           },
           {
             k: "uptime",
-            v: d.uptime_secs ? hms(Number(d.uptime_secs)) : "\u2014",
+            v: `<span id="uptime">${uptimeSample ? hms(uptimeSample.seconds) : "\u2014"}</span>`,
           },
         ];
         $("source").innerHTML = rows
@@ -420,7 +431,7 @@
         $("source-link").href = d.source_url || "#";
         $("build-version").textContent = d.version ? ` · v${d.version}` : "";
 
-        const sys = m.systems || [];
+        const sys = Array.from(new Set([...(m.systems || []), ...(failure ? [...(failure.systems || []), failure.host, ...(failure.completed || []).map(h => h.name)] : [])]));
         const outs = m.toplevels || [];
         const hostStats = {};
         (m.hosts || []).forEach((h) => (hostStats[h.name] = h));
@@ -431,11 +442,22 @@
         };
         const outName = (o) =>
           o ? (o.split("/").pop() || "").replace(/^\w+-/, "") : "";
+        const attempt = (s) => {
+          if (m.status === "up-to-date") return '<span class="muted">No build needed</span>';
+          if (m.status === "failed") {
+            if (!failure) return '<span class="muted">Unknown</span>';
+            if (failure.host === s) return '<span class="failure-title">✕ Failed</span>';
+            if ((failure.completed || []).some(h => h.name === s)) return '✓ Completed';
+            return '<span class="muted">Not attempted</span>';
+          }
+          if (m.status === "ok" && hostStats[s]) return '✓ Completed';
+          return '<span class="muted">Unknown</span>';
+        };
         const cell = (h) => {
           if (!h) return '<span style="color: var(--grey)">&mdash;</span>';
           const action = esc(h.action);
           const log = h.log
-            ? ` <a class="log-link" href="/logs/${encodeURIComponent(h.log)}">log</a>`
+            ? ` <a class="log-link" href="/logs/${encodeURIComponent(h.log)}">${m.status === "failed" && !failure ? "host log (outcome unknown)" : "published build log"}</a>`
             : "";
           return `<span class="tag tag-${action}">${action}</span>${
             h.action === "cached" && !h.secs ? "" : dur(h.secs)
@@ -445,36 +467,45 @@
           ? sys
               .map(
                 (s, i) =>
-                  `<tr><td class="value blue">${esc(s)}</td><td style="color: var(--grey)">${
+                  `<tr><td class="value blue">${esc(s)}</td><td class="attempt-cell">${attempt(s)}</td><td style="color: var(--grey)">${
                     esc(outName(outs[i])) || "\u2014"
                   }</td><td>${cell(hostStats[s])}</td></tr>`,
               )
               .join("")
-          : '<tr><td colspan="3" style="color: var(--grey)">no systems configured</td></tr>';
+          : '<tr><td colspan="4" style="color: var(--grey)">No published host details</td></tr>';
       }
 
       function tick() {
-        if (nextRunAt) {
+        if (uptimeSample && $("uptime")) {
+          $("uptime").textContent = hms(uptimeSample.seconds + Math.floor((performance.now() - uptimeSample.at) / 1000));
+        }
+        const countdown = $("countdown");
+        if (running) {
+          countdown.textContent = "in progress…";
+          countdown.style.color = "var(--yellow)";
+        } else if (nextRunAt) {
           const remain = nextRunAt - Date.now() / 1000;
-          const busy = running;
-          $("countdown").textContent = busy
-            ? "running…"
-            : remain > 0
-              ? hms(remain)
-              : "starting…";
-          $("countdown").style.color = busy
-            ? "var(--yellow)"
-            : remain > 0
-              ? "var(--blue)"
-              : "var(--grey)";
+          countdown.textContent = remain > 0 ? hms(remain) : "starting…";
+          countdown.style.color = remain > 0 ? "var(--blue)" : "var(--grey)";
+        } else {
+          countdown.textContent = "—";
+          countdown.style.color = "var(--grey)";
         }
       }
 
       async function refresh() {
         try {
-          const r = await fetch("/ui.json");
-          if (r.ok) render(await r.json());
-        } catch {}
+          const r = await fetch("/ui.json", { cache: "no-store" });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          render(await r.json());
+          lastRefresh = new Date();
+          $("refresh-state").className = "";
+          $("refresh-state").textContent = `updated ${lastRefresh.toLocaleTimeString()} · refreshes every 15s`;
+        } catch {
+          uptimeSample = null;
+          $("refresh-state").className = "stale";
+          $("refresh-state").textContent = lastRefresh ? `Connection lost · last updated ${lastRefresh.toLocaleTimeString()}` : "Unable to load dashboard data";
+        }
       }
 
       refresh();

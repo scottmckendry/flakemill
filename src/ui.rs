@@ -13,6 +13,13 @@ use serde::Serialize;
 pub struct Inner {
     pub running: bool,
     pub next_run_at: Option<u64>, // unix epoch secs
+    pub active_build: Option<ActiveBuild>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ActiveBuild {
+    pub host: String,
+    pub log: String,
 }
 
 #[derive(Clone)]
@@ -32,7 +39,22 @@ impl UiState {
     }
 
     pub fn set_running(&self, running: bool) {
-        self.inner.lock().unwrap().running = running;
+        let mut inner = self.inner.lock().unwrap();
+        inner.running = running;
+        if !running {
+            inner.active_build = None;
+        }
+    }
+
+    pub fn set_active_build(&self, host: &str, log: &str) {
+        self.inner.lock().unwrap().active_build = Some(ActiveBuild {
+            host: host.into(),
+            log: log.into(),
+        });
+    }
+
+    pub fn clear_active_build(&self) {
+        self.inner.lock().unwrap().active_build = None;
     }
 
     pub fn set_next_run_at(&self, at: u64) {
@@ -46,6 +68,7 @@ struct UiJson<'a> {
     serving: bool,
     signed: bool,
     running: bool,
+    active_build: Option<ActiveBuild>,
     next_run_at: Option<u64>,
     repo_url: &'a str,
     source_url: &'static str,
@@ -68,6 +91,7 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
         serving,
         signed,
         running: inner.running,
+        active_build: inner.active_build.clone(),
         next_run_at: inner.next_run_at,
         repo_url: &cfg.repo_url,
         source_url: env!("CARGO_PKG_REPOSITORY"),
@@ -115,6 +139,7 @@ mod tests {
             hosts: Vec::new(),
             updated_at: "100".into(),
             error: None,
+            failure: None,
         };
         crate::job::write_manifest(&dir, &manifest).unwrap();
         std::fs::write(dir.join("flake.lock"), b"{}").unwrap();
@@ -122,6 +147,7 @@ mod tests {
 
         let state = UiState::new(&dir);
         state.set_running(true);
+        state.set_active_build("eris", "eris.log");
         state.set_next_run_at(123);
         let value = ui_json(&state, &test_cfg());
 
@@ -130,6 +156,10 @@ mod tests {
         assert_eq!(value["serving"], true);
         assert_eq!(value["signed"], true);
         assert_eq!(value["running"], true);
+        assert_eq!(value["active_build"]["host"], "eris");
+        assert_eq!(value["active_build"]["log"], "eris.log");
+        state.set_running(false);
+        assert!(ui_json(&state, &test_cfg())["active_build"].is_null());
         assert_eq!(value["next_run_at"], 123);
         assert_eq!(value["repo_url"], "https://example.invalid/repo");
         assert_eq!(

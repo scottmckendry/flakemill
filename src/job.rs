@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::cmd::{run, run_capture, run_probe, run_with_sink};
@@ -19,7 +19,29 @@ pub struct Manifest {
     pub hosts: Vec<HostStat>,
     pub updated_at: String,
     pub error: Option<String>,
+    /// Outcomes from the failed attempt, separate from published host details.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<RunFailure>,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct RunFailure {
+    pub host: String,
+    pub stage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log: Option<String>,
+    pub completed: Vec<HostStat>,
+    #[serde(default)]
+    pub systems: Vec<String>,
+}
+
+impl std::fmt::Display for RunFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} for {}", self.stage, self.host)
+    }
+}
+
+impl std::error::Error for RunFailure {}
 
 /// Per-host build outcome for the dashboard.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -72,7 +94,11 @@ pub fn write_manifest(serve_dir: &Path, m: &Manifest) -> Result<()> {
 
 /// Record a failed run while preserving the last-known-good revision and
 /// host details for the dashboard.
-pub fn record_failure(serve_dir: &Path, error: impl Into<String>) -> Result<()> {
+pub fn record_failure(
+    serve_dir: &Path,
+    error: impl Into<String>,
+    failure: Option<RunFailure>,
+) -> Result<()> {
     let prev = read_manifest(serve_dir);
     write_manifest(
         serve_dir,
@@ -87,6 +113,7 @@ pub fn record_failure(serve_dir: &Path, error: impl Into<String>) -> Result<()> 
             hosts: prev.as_ref().map(|p| p.hosts.clone()).unwrap_or_default(),
             updated_at: unix_now().to_string(),
             error: Some(error.into()),
+            failure,
         },
     )
 }
@@ -114,7 +141,7 @@ fn is_cache_miss(stderr: &str) -> bool {
     stderr.contains("is not valid") || stderr.contains("cannot substitute")
 }
 
-pub fn run_job(cfg: &Cfg) -> Result<()> {
+pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
     // Previous manifest, if any. Used to keep the last-known toplevels/hosts
     // in the dashboard when a run is up-to-date or fails.
     let prev = read_manifest(&cfg.serve_dir);
@@ -176,20 +203,15 @@ pub fn run_job(cfg: &Cfg) -> Result<()> {
                 hosts: cfg
                     .systems
                     .iter()
-                    .map(|s| {
+                    .filter_map(|s| {
                         prev.as_ref()
                             .and_then(|p| p.hosts.iter().find(|h| h.name == *s))
                             .cloned()
-                            .unwrap_or(HostStat {
-                                name: s.clone(),
-                                action: HostAction::Cached,
-                                log: None,
-                                secs: 0,
-                            })
                     })
                     .collect(),
                 updated_at: unix_now().to_string(),
                 error: None,
+                failure: None,
             },
         )?;
         return Ok(());
@@ -205,16 +227,33 @@ pub fn run_job(cfg: &Cfg) -> Result<()> {
         let host_start = std::time::Instant::now();
         let attr = toplevel_attr(system);
         // Plan first: skip a system whose toplevel is already on cachix.
-        let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)?;
-        let log_name = format!("{system}.log");
+        let failure = |stage: &str, log: Option<String>| RunFailure {
+            host: system.clone(),
+            stage: stage.into(),
+            log,
+            completed: hosts.clone(),
+            systems: cfg.systems.clone(),
+        };
+        let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)
+            .map_err(|e| e.context(failure("evaluation", None)))?;
+        // Do not overwrite logs referenced by the last published manifest.
+        let log_name = format!(
+            "{}-{}.log",
+            system,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
         let log_path = logs_dir.join(&log_name);
         let cache_store = format!("https://{}.cachix.org", cfg.cache_name);
         let (cached, probe_err) =
-            run_probe("nix", &["path-info", "--store", &cache_store, &out], work)?;
+            run_probe("nix", &["path-info", "--store", &cache_store, &out], work)
+                .map_err(|e| e.context(failure("cache probe", None)))?;
         // Anything other than a clean miss (network down, bad token, nix
         // itself broken) must not silently trigger a full rebuild.
         if !cached && !is_cache_miss(&probe_err) {
-            bail!("cache probe for {system} failed: {probe_err}");
+            return Err(anyhow::anyhow!("{probe_err}").context(failure("cache probe", None)));
         }
         if cached {
             log::info!("{system}: toplevel already cached, skipping build");
@@ -232,6 +271,7 @@ pub fn run_job(cfg: &Cfg) -> Result<()> {
         } else {
             let mut log_file = std::fs::File::create(&log_path)
                 .with_context(|| format!("creating {}", log_path.display()))?;
+            ui.set_active_build(system, &log_name);
             let mut sink = |stream: &str, line: &str| {
                 use std::io::Write;
                 let _ = writeln!(log_file, "[{stream}] {line}");
@@ -249,12 +289,8 @@ pub fn run_job(cfg: &Cfg) -> Result<()> {
                 work,
                 Some(&mut sink),
             )
-            .map_err(|e| {
-                e.context(format!(
-                    "building {system} (failed after {}s)",
-                    host_start.elapsed().as_secs()
-                ))
-            })?;
+            .map_err(|e| e.context(failure("build", Some(log_name.clone()))))?;
+            ui.clear_active_build();
             hosts.push(HostStat {
                 name: system.clone(),
                 action: HostAction::Built,
@@ -308,6 +344,7 @@ pub fn run_job(cfg: &Cfg) -> Result<()> {
             hosts,
             updated_at: unix_now().to_string(),
             error: None,
+            failure: None,
         },
     )
 }
@@ -331,6 +368,7 @@ mod tests {
             }],
             updated_at: "100".into(),
             error: None,
+            failure: None,
         }
     }
 
@@ -374,7 +412,7 @@ mod tests {
         let previous = sample_manifest();
         write_manifest(&dir, &previous).unwrap();
 
-        record_failure(&dir, "boom").unwrap();
+        record_failure(&dir, "boom", None).unwrap();
         let failed = read_manifest(&dir).unwrap();
 
         assert_eq!(failed.status, "failed");
@@ -383,6 +421,25 @@ mod tests {
         assert_eq!(failed.toplevels, previous.toplevels);
         assert_eq!(failed.hosts, previous.hosts);
         assert_eq!(failed.error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn failed_attempt_preserves_published_data_and_tracks_failure() {
+        let dir = TempDir::new("manifest-host-failure");
+        let previous = sample_manifest();
+        write_manifest(&dir, &previous).unwrap();
+        let failure = RunFailure {
+            host: "eris".into(),
+            stage: "build".into(),
+            log: Some("eris-attempt.log".into()),
+            completed: vec![],
+            systems: vec!["eris".into(), "other".into()],
+        };
+        record_failure(&dir, "build failed", Some(failure.clone())).unwrap();
+        let result = read_manifest(&dir).unwrap();
+        assert_eq!(result.hosts, previous.hosts);
+        assert_eq!(result.toplevels, previous.toplevels);
+        assert_eq!(result.failure, Some(failure));
     }
 
     #[test]

@@ -1,6 +1,9 @@
 //! HTTP server exposing the published lock, signature, manifest, and UI.
 
-use std::path::Path;
+use std::{
+    io::{Read, Seek, SeekFrom},
+    path::Path,
+};
 
 use axum::{
     http::{header, StatusCode},
@@ -22,6 +25,36 @@ fn serve_file(dir: &Path, name: &str, content_type: &'static str) -> Response {
         Err(e) => {
             log::error!("reading {}: {e}", path.display());
             (StatusCode::INTERNAL_SERVER_ERROR, "error reading file\n").into_response()
+        }
+    }
+}
+
+const TAIL_BYTES: u64 = 32 * 1024;
+
+fn serve_log_tail(dir: &Path, name: &str) -> Response {
+    let result = (|| -> std::io::Result<String> {
+        let mut file = std::fs::File::open(dir.join(name))?;
+        let length = file.metadata()?.len();
+        file.seek(SeekFrom::Start(length.saturating_sub(TAIL_BYTES)))?;
+        let mut bytes = Vec::new();
+        file.take(TAIL_BYTES).read_to_end(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    })();
+    match result {
+        Ok(text) => (
+            [
+                (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            text,
+        )
+            .into_response(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            (StatusCode::NOT_FOUND, "log unavailable\n").into_response()
+        }
+        Err(e) => {
+            log::error!("reading log tail: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "error reading log\n").into_response()
         }
     }
 }
@@ -59,6 +92,15 @@ pub fn build_router(serve_dir: &std::path::Path, cfg: &Cfg, ui: UiState) -> axum
             }),
         )
         .route(
+            "/live-log",
+            axum::routing::get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    include_str!("ui/live-log.html"),
+                )
+            }),
+        )
+        .route(
             "/ui.json",
             axum::routing::get({
                 let cfg = cfg.clone();
@@ -84,6 +126,21 @@ pub fn build_router(serve_dir: &std::path::Path, cfg: &Cfg, ui: UiState) -> axum
         .route(
             "/manifest.json",
             file_route("manifest.json", "application/json"),
+        )
+        .route(
+            "/log-tail/:host",
+            axum::routing::get({
+                let dir = serve_dir.clone();
+                move |path: axum::extract::Path<String>| {
+                    let dir = dir.clone();
+                    async move {
+                        if !valid_log_name(&path.0) {
+                            return (StatusCode::BAD_REQUEST, "bad log name\n").into_response();
+                        }
+                        serve_log_tail(&dir.join("logs"), &path.0)
+                    }
+                }
+            }),
         )
         .route(
             "/logs/:host",
@@ -223,6 +280,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn serves_live_log_page() {
+        let dir = TempDir::new("server-live-log-page");
+        let app = build_router(&dir, &test_cfg(), UiState::new(&dir));
+        let response = app.oneshot(request("/live-log")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/html; charset=utf-8"
+        );
+        assert!(body_string(response).await.contains("Live build log"));
+    }
+
+    #[tokio::test]
+    async fn tail_is_bounded_and_validates_names() {
+        let dir = TempDir::new("server-tail");
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        let mut bytes = vec![b'x'; TAIL_BYTES as usize + 100];
+        bytes.extend_from_slice(b"end\n");
+        std::fs::write(dir.join("logs/eris.log"), bytes).unwrap();
+        let app = build_router(&dir, &test_cfg(), UiState::new(&dir));
+        let response = app
+            .clone()
+            .oneshot(request("/log-tail/eris.log"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = body_string(response).await;
+        assert_eq!(body.len(), TAIL_BYTES as usize);
+        assert!(body.ends_with("end\n"));
+        let response = app
+            .clone()
+            .oneshot(request("/log-tail/eris.txt"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app.oneshot(request("/log-tail/missing.log")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

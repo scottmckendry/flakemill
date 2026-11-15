@@ -186,13 +186,16 @@ fn serve() -> Result<()> {
                     // The pipeline shells out to git/nix/cachix, so keep all of
                     // that blocking work off the async runtime's worker threads.
                     let job_cfg = cfg.clone();
-                    match tokio::task::spawn_blocking(move || run_job(&job_cfg)).await {
+                    let job_ui = ui.clone();
+                    match tokio::task::spawn_blocking(move || run_job(&job_cfg, &job_ui)).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => {
                             log::error!("update job failed: {e:#}");
-                            if let Err(record_err) =
-                                record_failure(&cfg.serve_dir, format!("{e:#}"))
-                            {
+                            if let Err(record_err) = record_failure(
+                                &cfg.serve_dir,
+                                format!("{e:#}"),
+                                e.downcast_ref::<job::RunFailure>().cloned(),
+                            ) {
                                 log::error!("recording failed manifest: {record_err:#}");
                             }
                         }
@@ -203,7 +206,7 @@ fn serve() -> Result<()> {
                                 format!("update job was cancelled: {join_err}")
                             };
                             log::error!("{message}");
-                            if let Err(record_err) = record_failure(&cfg.serve_dir, message) {
+                            if let Err(record_err) = record_failure(&cfg.serve_dir, message, None) {
                                 log::error!("recording failed manifest: {record_err:#}");
                             }
                         }
