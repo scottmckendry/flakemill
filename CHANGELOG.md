@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/scottmckendry/flakemill/compare/v0.2.1...v0.3.0) (2026-11-15)
+
+
+### Features
+
+* add flakemill client ([ee7c6d6](https://github.com/scottmckendry/flakemill/commit/ee7c6d6d3e26bf8fca8a7cdc5b4c7e391092367e))
+* show version and source link in dashboard ([a0f91cf](https://github.com/scottmckendry/flakemill/commit/a0f91cf169e82638c3e892a8df3a20380711408d))
+
+
+### Bug Fixes
+
+* **container:** cache cargo outputs ([58bb835](https://github.com/scottmckendry/flakemill/commit/58bb8355178ec006243a89cdabcf6f41e6802c81))
+* **container:** disable nix sandbox ([68d5e0e](https://github.com/scottmckendry/flakemill/commit/68d5e0edc9136495e636a844ccf2eb7d0a284e33))
+* **dashboard:** improve usability ([f53a901](https://github.com/scottmckendry/flakemill/commit/f53a9016b8658169551f7c829c362e9147b3bd0f))
+
 ## [0.2.1](https://github.com/scottmckendry/flakemill/compare/v0.2.0...v0.2.1) (2026-11-15)
 
 
