@@ -17,9 +17,10 @@ ENV PATH=/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:${PATH}
 # cachix (no GH releases; install via its official nix expr)
 RUN nix-env -iA cachix -f https://cachix.org/api/v1/install
 
-# nix needs these dirs even in "container mode" for userless builds
+# configure nix to run in the container
 RUN mkdir -p /nix/var/nix/profiles/per-user/root \
-    && echo "build-users-group =" >> /etc/nix/nix.conf
+    && printf 'build-users-group = nixbld\nsandbox = false\n' >> /etc/nix/nix.conf \
+    && test ! -e /homeless-shelter
 RUN mv /nix /nix.seed
 
 # warm the dep cache so later rebuilds only compile our crate

@@ -34,9 +34,10 @@ RUN nix-env -iA cachix -f https://cachix.org/api/v1/install
 
 COPY --from=build /build/target/release/flakemill /usr/local/bin/flakemill
 
-# nix needs these dirs even in "container mode" for userless builds
+# configure nix to run in the container
 RUN mkdir -p /nix/var/nix/profiles/per-user/root \
-    && echo "build-users-group =" >> /etc/nix/nix.conf
+    && printf 'build-users-group = nixbld\nsandbox = false\n' >> /etc/nix/nix.conf \
+    && test ! -e /homeless-shelter
 
 # create a seed of the nix store
 RUN mv /nix /nix.seed
