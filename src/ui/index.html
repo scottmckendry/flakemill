@@ -45,8 +45,9 @@
       body {
         background: var(--bg);
         color: var(--fg);
-        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
-          Consolas, monospace;
+        font-family:
+          "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+          monospace;
         line-height: 1.6;
         max-width: 64rem;
         margin: 0 auto;
@@ -102,9 +103,15 @@
         font-size: 1.05rem;
         overflow-wrap: anywhere;
       }
-      .value.blue { color: var(--blue); }
-      .value.cyan { color: var(--cyan); }
-      .value.orange { color: var(--orange); }
+      .value.blue {
+        color: var(--blue);
+      }
+      .value.cyan {
+        color: var(--cyan);
+      }
+      .value.orange {
+        color: var(--orange);
+      }
       .countdown {
         font-size: 2rem;
         font-variant-numeric: tabular-nums;
@@ -136,17 +143,37 @@
         font-weight: bold;
       }
       .status-ok,
-      .status-up-to-date { color: var(--green); }
-      .status-failed { color: var(--red); }
-      .status-running { color: var(--yellow); }
+      .status-up-to-date {
+        color: var(--green);
+      }
+      .status-failed {
+        color: var(--red);
+      }
+      .status-running {
+        color: var(--yellow);
+      }
       .status-idle,
-      .status-unknown { color: var(--grey); }
-      .status-ok::before { content: "[ ok ]"; }
-      .status-up-to-date::before { content: "[ up-to-date ]"; }
-      .status-failed::before { content: "[ failed ]"; }
-      .status-running::before { content: "[ running ]"; }
-      .status-idle::before { content: "[ idle ]"; }
-      .status-unknown::before { content: "[ … ]"; }
+      .status-unknown {
+        color: var(--grey);
+      }
+      .status-ok::before {
+        content: "[ ok ]";
+      }
+      .status-up-to-date::before {
+        content: "[ up-to-date ]";
+      }
+      .status-failed::before {
+        content: "[ failed ]";
+      }
+      .status-running::before {
+        content: "[ running ]";
+      }
+      .status-idle::before {
+        content: "[ idle ]";
+      }
+      .status-unknown::before {
+        content: "[ … ]";
+      }
       .dot {
         display: inline-block;
         width: 0.6em;
@@ -155,9 +182,15 @@
         margin-right: 0.4em;
         vertical-align: baseline;
       }
-      .dot-ok { background: var(--green); }
-      .dot-failed { background: var(--red); }
-      .dot-idle { background: var(--grey); }
+      .dot-ok {
+        background: var(--green);
+      }
+      .dot-failed {
+        background: var(--red);
+      }
+      .dot-idle {
+        background: var(--grey);
+      }
       .log-link {
         color: var(--cyan);
         font-size: 0.72rem;
@@ -170,8 +203,14 @@
         margin-right: 0.4em;
         font-weight: bold;
       }
-      .tag-built { color: var(--bg); background: var(--orange); }
-      .tag-cached { color: var(--bg); background: var(--green); }
+      .tag-built {
+        color: var(--bg);
+        background: var(--orange);
+      }
+      .tag-cached {
+        color: var(--bg);
+        background: var(--green);
+      }
       .error {
         background: var(--bg-alt);
         border: 1px solid var(--red);
@@ -188,6 +227,12 @@
         color: var(--grey);
         margin-top: 3rem;
         font-size: 0.8rem;
+      }
+      footer a {
+        color: var(--grey);
+      }
+      footer a:hover {
+        color: var(--blue);
       }
       footer::before {
         content: "~ ";
@@ -208,19 +253,27 @@
     <div class="card" style="margin-bottom: 1rem">
       <span class="label">last run</span><br />
       <span id="status" class="status status-unknown"></span>
-      <span id="last-run-detail" class="value" style="color: var(--grey)"></span>
+      <span
+        id="last-run-detail"
+        class="value"
+        style="color: var(--grey)"
+      ></span>
     </div>
     <div id="error-box" class="error" style="display: none"></div>
 
     <div class="grid" style="margin-top: 1rem">
       <div class="card">
         <span class="label">next run</span><br />
-        <span id="countdown" class="value countdown blue">&ndash;&ndash;:--:--</span><br />
+        <span id="countdown" class="value countdown blue"
+          >&ndash;&ndash;:--:--</span
+        ><br />
         <span id="next-run-at" class="label"></span>
       </div>
       <div class="card">
         <span class="label">health</span><br />
-        <span id="health" class="value"><span class="dot dot-idle"></span>unknown</span><br />
+        <span id="health" class="value"
+          ><span class="dot dot-idle"></span>unknown</span
+        ><br />
         <span id="serving" class="label"></span>
       </div>
     </div>
@@ -229,9 +282,17 @@
     <div class="card">
       <table>
         <thead>
-          <tr><th>host</th><th>output</th><th>last build</th></tr>
+          <tr>
+            <th>host</th>
+            <th>output</th>
+            <th>last build</th>
+          </tr>
         </thead>
-        <tbody id="systems"><tr><td colspan="3" style="color: var(--grey)">loading…</td></tr></tbody>
+        <tbody id="systems">
+          <tr>
+            <td colspan="3" style="color: var(--grey)">loading…</td>
+          </tr>
+        </tbody>
       </table>
     </div>
 
@@ -242,7 +303,11 @@
       </table>
     </div>
 
-    <footer>read-only dashboard &middot; refreshed every 15s</footer>
+    <footer>
+      read-only dashboard &middot; refreshed every 15s &middot;
+      <a id="source-link" target="_blank" rel="noopener noreferrer">github</a>
+      <span id="build-version"></span>
+    </footer>
 
     <script>
       const $ = (id) => document.getElementById(id);
@@ -261,11 +326,20 @@
               "'": "&#39;",
             })[c],
         );
+      const repoHref = (u) => {
+        if (!u) return "";
+        const scpLike = /^git@([^:]+):(.+)$/.exec(u);
+        const sshUrl = /^ssh:\/\/git@([^/]+)\/(.+)$/.exec(u);
+        const m = scpLike || sshUrl;
+        const href = m ? `https://${m[1]}/${m[2]}` : u;
+        return href.replace(/\.git\/?$/, "");
+      };
       const ago = (s) => {
         if (!s) return "";
         const d = Date.now() / 1000 - Number(s);
         if (d < 0) return "";
-        const h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60);
+        const h = Math.floor(d / 3600),
+          m = Math.floor((d % 3600) / 60);
         if (h > 0) return ` · ${h}h${m}m ago`;
         if (m > 0) return ` · ${m}m ago`;
         return ` · just now`;
@@ -319,18 +393,32 @@
           ? "at " + epoch(d.next_run_at)
           : "";
         const interval = d.interval_secs;
-        $("source").innerHTML = [
-          ["repo", d.repo_url || "\u2014"],
-          ["branch", d.branch || "\u2014"],
-          ["cachix", d.cachix_cache || "\u2014"],
-          ["interval", interval ? `${Math.round(interval / 60)} min` : "\u2014"],
-          ["uptime", d.uptime_secs ? hms(Number(d.uptime_secs)) : "\u2014"],
-        ]
+        const rows = [
+          {
+            k: "repo",
+            v: d.repo_url
+              ? `<a href="${esc(repoHref(d.repo_url))}" target="_blank" rel="noopener noreferrer">${esc(d.repo_url)}</a>`
+              : "\u2014",
+          },
+          { k: "branch", v: esc(d.branch || "\u2014") },
+          { k: "cachix", v: esc(d.cachix_cache || "\u2014") },
+          {
+            k: "interval",
+            v: interval ? `${Math.round(interval / 60)} min` : "\u2014",
+          },
+          {
+            k: "uptime",
+            v: d.uptime_secs ? hms(Number(d.uptime_secs)) : "\u2014",
+          },
+        ];
+        $("source").innerHTML = rows
           .map(
-            ([k, v]) =>
-              `<tr><td class="label" style="border:0">${esc(k)}</td><td class="value cyan" style="border:0">${esc(v)}</td></tr>`,
+            ({ k, v }) =>
+              `<tr><td class="label" style="border:0">${esc(k)}</td><td class="value cyan" style="border:0">${v}</td></tr>`,
           )
           .join("");
+        $("source-link").href = d.source_url || "#";
+        $("build-version").textContent = d.version ? ` · v${d.version}` : "";
 
         const sys = m.systems || [];
         const outs = m.toplevels || [];
@@ -342,7 +430,7 @@
           return s >= 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s}s`;
         };
         const outName = (o) =>
-          o ? (o.split('/').pop() || "").replace(/^\w+-/, "") : "";
+          o ? (o.split("/").pop() || "").replace(/^\w+-/, "") : "";
         const cell = (h) => {
           if (!h) return '<span style="color: var(--grey)">&mdash;</span>';
           const action = esc(h.action);

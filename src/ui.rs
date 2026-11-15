@@ -48,6 +48,8 @@ struct UiJson<'a> {
     running: bool,
     next_run_at: Option<u64>,
     repo_url: &'a str,
+    source_url: &'static str,
+    version: &'static str,
     branch: &'a str,
     cachix_cache: &'a str,
     interval_secs: u64,
@@ -68,6 +70,8 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
         running: inner.running,
         next_run_at: inner.next_run_at,
         repo_url: &cfg.repo_url,
+        source_url: env!("CARGO_PKG_REPOSITORY"),
+        version: env!("CARGO_PKG_VERSION"),
         branch: &cfg.branch,
         cachix_cache: &cfg.cache_name,
         interval_secs: cfg.interval.as_secs(),
@@ -128,6 +132,11 @@ mod tests {
         assert_eq!(value["running"], true);
         assert_eq!(value["next_run_at"], 123);
         assert_eq!(value["repo_url"], "https://example.invalid/repo");
+        assert_eq!(
+            value["source_url"],
+            "https://github.com/scottmckendry/flakemill"
+        );
+        assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(value["branch"], "main");
         assert_eq!(value["cachix_cache"], "cache");
         assert_eq!(value["interval_secs"], 300);
