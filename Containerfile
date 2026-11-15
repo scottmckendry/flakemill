@@ -44,4 +44,4 @@ RUN mv /nix /nix.seed
 COPY container/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["/usr/local/bin/flakemill"]
+CMD ["/usr/local/bin/flakemill", "serve"]

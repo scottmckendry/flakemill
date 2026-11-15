@@ -2,10 +2,12 @@
 name = "flakemill"
 version = "0.2.1"
 edition = "2021"
+repository = "https://github.com/scottmckendry/flakemill"
 
 [dependencies]
 anyhow = "1"
 axum = "0.7"
+clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -4,6 +4,9 @@
 //! cachix, then serves a *signed* flake.lock over HTTP. Never pushes to
 //! the source repo — hosts fetch and apply as they please.
 
+use std::{path::PathBuf, process::ExitCode, time::Duration};
+
+mod client;
 mod cmd;
 mod config;
 mod job;
@@ -12,13 +15,152 @@ mod server;
 mod test_support;
 mod ui;
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
+use clap::{Parser, Subcommand};
 
+use client::{Check, Client};
 use config::load_cfg;
 use job::{record_failure, run_job, unix_now};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[derive(Parser, Debug)]
+#[command(
+    name = "flakemill",
+    version,
+    about = "External update service for Nix flakes"
+)]
+struct Cli {
+    /// Base URL of the flakemill service (client commands only).
+    #[arg(long, env = "FLAKEMILL_URL", global = true)]
+    url: Option<String>,
+
+    /// Minisign public key file used to verify published locks.
+    #[arg(long, env = "FLAKEMILL_PUBLIC_KEY", global = true)]
+    public_key: Option<PathBuf>,
+
+    /// Local flake.lock to compare against or update.
+    #[arg(
+        long,
+        env = "FLAKEMILL_LOCK",
+        default_value = "flake.lock",
+        global = true
+    )]
+    lock: PathBuf,
+
+    /// HTTP timeout in seconds.
+    #[arg(long, default_value_t = 60, global = true)]
+    timeout: u64,
+
+    /// Accept an unsigned lock. Only intended for local development.
+    #[arg(long, global = true)]
+    allow_unsigned: bool,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Run the update service.
+    Serve,
+
+    /// Report whether the published lock differs from the local lock.
+    ///
+    /// Exits 0 when up to date, 1 when an update is available, and 2 on error.
+    Check {
+        /// Print nothing unless there is an error.
+        #[arg(long)]
+        quiet: bool,
+    },
+
+    /// Fetch, verify, and atomically replace the local lock.
+    Apply {
+        /// Print nothing unless there is an error.
+        #[arg(long)]
+        quiet: bool,
+    },
+
+    /// Fetch and verify a lock, writing it to stdout or a file.
+    Fetch {
+        /// Write the verified lock here instead of stdout.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("flakemill: {e:#}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> Result<ExitCode> {
+    let cli = Cli::parse();
+    match &cli.command {
+        Command::Serve => {
+            serve()?;
+            Ok(ExitCode::SUCCESS)
+        }
+        command => run_client(&cli, command),
+    }
+}
+
+fn run_client(cli: &Cli, command: &Command) -> Result<ExitCode> {
+    let url = cli
+        .url
+        .clone()
+        .context("--url (or FLAKEMILL_URL) is required for client commands")?;
+    if cli.public_key.is_none() && !cli.allow_unsigned {
+        bail!("--public-key (or FLAKEMILL_PUBLIC_KEY) is required; pass --allow-unsigned for development");
+    }
+
+    let client = Client {
+        url,
+        public_key: cli.public_key.clone(),
+        lock: cli.lock.clone(),
+        timeout: Duration::from_secs(cli.timeout.max(1)),
+    };
+
+    match command {
+        Command::Check { quiet } => match client.check().context("checking published lock")? {
+            Check::UpToDate => {
+                if !*quiet {
+                    println!("up to date");
+                }
+                Ok(ExitCode::SUCCESS)
+            }
+            Check::UpdateAvailable => {
+                if !*quiet {
+                    println!("update available");
+                }
+                Ok(ExitCode::from(1))
+            }
+        },
+        Command::Apply { quiet } => {
+            let changed = client.apply().context("applying published lock")?;
+            if !*quiet {
+                if changed {
+                    println!("updated {}", client.lock.display());
+                } else {
+                    println!("already up to date");
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Fetch { output } => {
+            client
+                .fetch_to(output.as_deref())
+                .context("fetching published lock")?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Serve => unreachable!("serve is handled before client dispatch"),
+    }
+}
+
+fn serve() -> Result<()> {
     use tracing_subscriber::EnvFilter;
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -26,52 +168,57 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| EnvFilter::new("info,tower_http=debug")),
         )
         .init();
-    let cfg = load_cfg()?;
-    std::fs::create_dir_all(&cfg.serve_dir)?;
 
-    let addr = std::env::var("LISTEN").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
-    let ui = ui::UiState::new(&cfg.serve_dir);
-    let app = server::build_router(&cfg.serve_dir, &cfg, ui.clone());
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let cfg = load_cfg()?;
+        std::fs::create_dir_all(&cfg.serve_dir)?;
 
-    tokio::spawn({
-        let cfg = cfg.clone();
-        async move {
-            loop {
-                ui.set_running(true);
+        let addr = std::env::var("LISTEN").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+        let ui = ui::UiState::new(&cfg.serve_dir);
+        let app = server::build_router(&cfg.serve_dir, &cfg, ui.clone());
 
-                // The pipeline shells out to git/nix/cachix, so keep all of
-                // that blocking work off the async runtime's worker threads.
-                let job_cfg = cfg.clone();
-                match tokio::task::spawn_blocking(move || run_job(&job_cfg)).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        log::error!("update job failed: {e:#}");
-                        if let Err(record_err) = record_failure(&cfg.serve_dir, format!("{e:#}")) {
-                            log::error!("recording failed manifest: {record_err:#}");
+        tokio::spawn({
+            let cfg = cfg.clone();
+            async move {
+                loop {
+                    ui.set_running(true);
+
+                    // The pipeline shells out to git/nix/cachix, so keep all of
+                    // that blocking work off the async runtime's worker threads.
+                    let job_cfg = cfg.clone();
+                    match tokio::task::spawn_blocking(move || run_job(&job_cfg)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            log::error!("update job failed: {e:#}");
+                            if let Err(record_err) =
+                                record_failure(&cfg.serve_dir, format!("{e:#}"))
+                            {
+                                log::error!("recording failed manifest: {record_err:#}");
+                            }
+                        }
+                        Err(join_err) => {
+                            let message = if join_err.is_panic() {
+                                format!("update job panicked: {join_err}")
+                            } else {
+                                format!("update job was cancelled: {join_err}")
+                            };
+                            log::error!("{message}");
+                            if let Err(record_err) = record_failure(&cfg.serve_dir, message) {
+                                log::error!("recording failed manifest: {record_err:#}");
+                            }
                         }
                     }
-                    Err(join_err) => {
-                        let message = if join_err.is_panic() {
-                            format!("update job panicked: {join_err}")
-                        } else {
-                            format!("update job was cancelled: {join_err}")
-                        };
-                        log::error!("{message}");
-                        if let Err(record_err) = record_failure(&cfg.serve_dir, message) {
-                            log::error!("recording failed manifest: {record_err:#}");
-                        }
-                    }
+
+                    ui.set_running(false);
+                    ui.set_next_run_at(unix_now().saturating_add(cfg.interval.as_secs()));
+                    tokio::time::sleep(cfg.interval).await;
                 }
-
-                ui.set_running(false);
-                ui.set_next_run_at(unix_now().saturating_add(cfg.interval.as_secs()));
-                tokio::time::sleep(cfg.interval).await;
             }
-        }
-    });
+        });
 
-    log::info!("listening on {addr}");
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
-    Ok(())
+        log::info!("listening on {addr}");
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        axum::serve(listener, app).await?;
+        Ok(())
+    })
 }

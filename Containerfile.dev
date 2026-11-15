@@ -35,4 +35,4 @@ RUN cargo clean -p flakemill
 
 COPY container/entrypoint.sh /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["cargo", "watch", "-x", "run"]
+CMD ["cargo", "watch", "-x", "run -- serve"]
