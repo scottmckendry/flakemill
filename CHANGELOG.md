@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/scottmckendry/flakemill/compare/v0.2.0...v0.2.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* misc fixes, clean up and tests ([5546605](https://github.com/scottmckendry/flakemill/commit/5546605298194bcd1c217f93bc22369abb07ab62))
+
 ## [0.2.0](https://github.com/scottmckendry/flakemill/compare/v0.1.1...v0.2.0) (2026-11-15)
 
 
