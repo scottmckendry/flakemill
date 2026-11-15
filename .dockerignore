@@ -1,0 +1,17 @@
+target
+keys
+secrets
+.git
+.direnv
+result
+result-*
+Cargo.lock.orig
+Containerfile
+Containerfile.dev
+compose.yaml
+README.md
+LICENSE
+CHANGELOG.md
+release-please-config.json
+flake.lock
+flake.nix

@@ -1,0 +1,35 @@
+FROM rust:1-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git ca-certificates minisign \
+    && rm -rf /var/lib/apt/lists/*
+
+# force ANSI colours in cargo output even when not attached to a TTY
+# (compose/docker logs strip tty detection)
+ENV CARGO_TERM_COLOR=always
+ENV TERM=xterm-256color
+
+# nix (determinate installer, same as prod)
+RUN curl -fsSL https://install.determinate.systems/nix \
+      | sh -s -- install linux --init none --no-confirm
+ENV PATH=/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:${PATH}
+
+# cachix (no GH releases; install via its official nix expr)
+RUN nix-env -iA cachix -f https://cachix.org/api/v1/install
+
+# nix needs these dirs even in "container mode" for userless builds
+RUN mkdir -p /nix/var/nix/profiles/per-user/root \
+    && echo "build-users-group =" >> /etc/nix/nix.conf
+RUN mv /nix /nix.seed
+
+# warm the dep cache so later rebuilds only compile our crate
+WORKDIR /build
+COPY Cargo.toml Cargo.lock* ./
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && cargo build && rm -rf src
+RUN cargo install cargo-watch
+
+# source is bind-mounted at runtime; seed it so the image is self-contained too
+COPY src ./src
+COPY container/entrypoint.sh /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["cargo", "watch", "-x", "run"]

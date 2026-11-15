@@ -1,22 +1,28 @@
-# Repeatable local test rig for the flakemill.
+# Local test rig with hot-reload: every save under src/ rebuilds and
+# restarts the container via cargo-watch.
 #
 #   podman compose up --build
 #   curl localhost:8080/healthz
-#   curl localhost:8080/flake.lock
 #   curl localhost:8080/manifest.json | jq
 #
 # run ./secrets/make-keys.sh to create signing keys
+#
+# NOTE: this is the dev rig. Release images are built from `Containerfile`
+# (see the publish workflow), which bakes in a prebuilt binary instead.
 
 services:
   flakemill:
     build:
       context: .
-      dockerfile: Containerfile
-    image: flakemill
+      dockerfile: Containerfile.dev
+    image: flakemill-dev
     container_name: flakemill
     ports:
       - "8080:8080"
     volumes:
+      - ./src:/build/src
+      - ./Cargo.toml:/build/Cargo.toml
+      - ./Cargo.lock:/build/Cargo.lock
       - nix-store:/nix
       - service-data:/var/lib/flakemill
       - ./keys:/secrets:ro
