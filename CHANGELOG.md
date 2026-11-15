@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/scottmckendry/flakemill/compare/v0.1.1...v0.2.0) (2026-11-15)
+
+
+### Features
+
+* add basic dashboard ([9a5289e](https://github.com/scottmckendry/flakemill/commit/9a5289e3714591d26995820e12077657e320baf2))
+
+
+### Bug Fixes
+
+* lock comparison post update ([3f09cfd](https://github.com/scottmckendry/flakemill/commit/3f09cfd5b3523b61be9bea60537c9c11754ad639))
+
 ## [0.1.1](https://github.com/scottmckendry/flakemill/compare/v0.1.0...v0.1.1) (2026-11-14)
 
 
