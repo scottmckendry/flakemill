@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/scottmckendry/flakemill/compare/v0.3.0...v0.4.0) (2026-11-16)
+
+
+### Features
+
+* **client:** show changed inputs on apply/check ([99bece6](https://github.com/scottmckendry/flakemill/commit/99bece649949962b7c5c008c006dd716bf980a6e))
+* **dashboard:** design update ([287727a](https://github.com/scottmckendry/flakemill/commit/287727a4ca542fed1c41e7d191df2a5bf8b43f11))
+
+
+### Bug Fixes
+
+* **container:** validate nix install and seed cachix config ([172ef6d](https://github.com/scottmckendry/flakemill/commit/172ef6daed28741bb036b46ad27991d1d596dff4))
+* **dashboard:** add favicon ([400c2b0](https://github.com/scottmckendry/flakemill/commit/400c2b0783814d6e948a0d6df1c3c023a8996a3c))
+* **flake:** include sha in package version ([05c8101](https://github.com/scottmckendry/flakemill/commit/05c810141e071b5bcebc5911a8696c0b94b25160))
+
 ## [0.3.0](https://github.com/scottmckendry/flakemill/compare/v0.2.1...v0.3.0) (2026-11-15)
 
 
