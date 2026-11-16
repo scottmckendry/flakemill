@@ -1,14 +1,25 @@
-# flakemill
+<h1 align="center">❄️ flakemill</h1>
 
-An external update service for [nix flakes](https://nixos.wiki/wiki/Flakes).
+<p align="center">
+  <a href="https://flakemill.axis.scottmckendry.tech/">live example</a> ·
+  <a href="#how-it-works">how it works</a> ·
+  <a href="#usage">usage</a> ·
+  <a href="#configuration">configuration</a> ·
+  <a href="#endpoints">endpoints</a>
+</p>
 
-`flakemill` pulls the latest revision of your config repo, refreshes `flake.lock`, builds every configured system, pushes the results to a [cachix](https://cachix.org) cache, and serves a **minisign-signed** lockfile over HTTP.
+---
 
-Hosts in the fleet then fetch the lock, verify its signature against a pinned public key, and apply it on their own schedule.
+<img width="1192" height="658" alt="1794867522400066767" src="https://github.com/user-attachments/assets/a4ef57e4-6b6c-47a6-a74a-68a0b211329c" />
 
-The mill complements the source repo's update process but never controls it. Nothing is ever pushed back to the repo - it only ever mills and serves.
 
-## How it works
+An external update service for [Nix flakes](https://nixos.wiki/wiki/Flakes): refresh a lockfile, build your systems, and serve the verified result for hosts to apply on their own schedule.
+
+- **Build before publishing.** A new lock is served only after all configured systems build and their results are pushed to [Cachix](https://cachix.org).
+- **Verify before applying.** Hosts can check the lock's minisign signature against a pinned public key.
+- **Keep control of your repo.** flakemill never pushes changes back; it only mills and serves.
+
+## how it works
 
 On every tick (or manual trigger), flakemill runs:
 
@@ -20,9 +31,9 @@ On every tick (or manual trigger), flakemill runs:
 5. **Serve** - only if every step succeeded: atomically publish
    `flake.lock` + minisign signature
 
-A failed build never publishes a lock, so hosts never pick up a broken fleet.
+> A failed build never publishes a new lock. Hosts continue to use the last successfully published result.
 
-## Endpoints
+## endpoints
 
 | Path                      | Contents                                     |
 | ------------------------- | -------------------------------------------- |
@@ -34,10 +45,31 @@ A failed build never publishes a lock, so hosts never pick up a broken fleet.
 | `GET /logs/{host}.log`    | latest captured build log for a system       |
 | `GET /healthz`            | liveness                                     |
 
-## Usage
+## usage
 
-`flakemill` is a single entry point. Run the service with `serve`, or use the
-same binary as a client:
+### run the container
+
+The published [container image](https://github.com/scottmckendry/flakemill/pkgs/container/flakemill) includes Nix, Cachix and minisign. For example, with Docker (or Podman):
+
+```sh
+docker run -d --name flakemill \
+  -p 8080:8080 \
+  -v flakemill-nix:/nix \
+  -v flakemill-data:/var/lib/flakemill \
+  -v /path/to/minisign.key:/secrets/sign.key:ro \
+  --env-file /path/to/flakemill.env \
+  -e REPO_URL=https://github.com/example/nix-config \
+  -e SYSTEMS=host1,host2 \
+  -e CACHIX_CACHE=your-cache \
+  -e SIGN_KEY=/secrets/sign.key \
+  ghcr.io/scottmckendry/flakemill:latest
+```
+
+Replace the example values and put `CACHIX_AUTH_TOKEN` in the env file. The volumes persist the Nix store and service data; mount your minisign secret key read-only and distribute its public key to clients. See [configuration](#configuration) for more options, or take a look at the [example Kubernetes deployment](https://github.com/scottmckendry/axis/blob/main/kubernetes/apps/flakemill/deployment.yaml).
+
+### run the service and use a lock
+
+The same binary runs the mill and acts as its client:
 
 ```sh
 flakemill serve
@@ -57,7 +89,7 @@ The URL, public key, and local lock path can also be set with
 require `curl` and `minisign` on `PATH`; the Nix package supplies both.
 Unsigned locks are rejected unless `--allow-unsigned` is passed explicitly.
 
-## Flake outputs
+### run with nix
 
 ```sh
 nix run github:scottmckendry/flakemill -- serve
@@ -67,9 +99,9 @@ nix build github:scottmckendry/flakemill
 
 `packages.<system>.flakemill` is the shared entry point.
 
-## Configuration
+## configuration
 
-Server configuration is environment-based:
+Configure the server with environment variables. Set `SIGN_KEY` to publish signed locks; clients reject unsigned locks by default.
 
 | Variable            | Default                    | Description                                                                    |
 | ------------------- | -------------------------- | ------------------------------------------------------------------------------ |
@@ -81,9 +113,11 @@ Server configuration is environment-based:
 | `SIGN_KEY`          |                            | Path to the minisign secret key (unset publishes unsigned locks)               |
 | `WORK_DIR`          | `/var/lib/flakemill/work`  | Repo checkout                                                                  |
 | `SERVE_DIR`         | `/var/lib/flakemill/serve` | Published lock + signature                                                     |
-| `INTERVAL_SECS`     | `21600`                    | Seconds between update runs (must be greater than zero)                         |
+| `INTERVAL_SECS`     | `21600`                    | Seconds between update runs (must be greater than zero)                        |
 | `LISTEN`            | `0.0.0.0:8080`             | HTTP listen address                                                            |
 | `NIX_CONFIG`        |                            | Extra nix.conf lines, e.g. `access-tokens` for private inputs (`secrets/.env`) |
+
+### cache setup
 
 The container configures `CACHIX_CACHE` as both a push target and a substituter
 at startup, so a first build on an empty store can reuse dependency closures
