@@ -76,7 +76,7 @@ Server configuration is environment-based:
 | `REPO_URL`          |                            | Config repo to sync and build from                                             |
 | `BRANCH`            | `main`                     | Branch to track                                                                |
 | `SYSTEMS`           |                            | Comma-separated NixOS hosts to build                                           |
-| `CACHIX_CACHE`      |                            | Cache to push build results to                                                 |
+| `CACHIX_CACHE`      |                            | Build cache to push results to and substitute from                             |
 | `CACHIX_AUTH_TOKEN` |                            | Cachix push token (`secrets/.env`)                                             |
 | `SIGN_KEY`          |                            | Path to the minisign secret key (unset publishes unsigned locks)               |
 | `WORK_DIR`          | `/var/lib/flakemill/work`  | Repo checkout                                                                  |
@@ -84,3 +84,18 @@ Server configuration is environment-based:
 | `INTERVAL_SECS`     | `21600`                    | Seconds between update runs (must be greater than zero)                         |
 | `LISTEN`            | `0.0.0.0:8080`             | HTTP listen address                                                            |
 | `NIX_CONFIG`        |                            | Extra nix.conf lines, e.g. `access-tokens` for private inputs (`secrets/.env`) |
+
+The container configures `CACHIX_CACHE` as both a push target and a substituter
+at startup, so a first build on an empty store can reuse dependency closures
+that are already cached. The cache must already contain those paths; a
+brand-new cache still requires one cold build before it can help.
+
+When running outside the container, configure the cache yourself, either with
+`cachix use <cache>` or via `NIX_CONFIG`:
+
+```sh
+export NIX_CONFIG='
+extra-substituters = https://<cache>.cachix.org
+extra-trusted-public-keys = <cache>.cachix.org-1:...
+'
+```
