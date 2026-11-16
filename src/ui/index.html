@@ -6,37 +6,6 @@
     <title>flakemill</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext x='32' y='50' text-anchor='middle' font-size='56' fill='%237ed8e8'%3E%E2%9D%84%3C/text%3E%3C/svg%3E" />
     <style>
-      :root {
-        --bg: #16181a;
-        --bg-alt: #1e2124;
-        --bg-hl: #3c4048;
-        --fg: #ffffff;
-        --grey: #7b8496;
-        --blue: #5ea1ff;
-        --green: #5eff6c;
-        --cyan: #5ef1ff;
-        --red: #ff6e5e;
-        --yellow: #f1ff5e;
-        --magenta: #ff5ef1;
-        --orange: #ffbd5e;
-        --border: #3c4048;
-      }
-      @media (prefers-color-scheme: light) {
-        :root {
-          --bg: #ffffff;
-          --bg-alt: #eaeaea;
-          --bg-hl: #acacac;
-          --fg: #16181a;
-          --blue: #0057d1;
-          --green: #008b0c;
-          --cyan: #008c99;
-          --red: #d11500;
-          --yellow: #997b00;
-          --magenta: #d100bf;
-          --orange: #d17c00;
-          --border: #acacac;
-        }
-      }
       * {
         box-sizing: border-box;
         border: 0;
@@ -50,54 +19,25 @@
           "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
           monospace;
         line-height: 1.6;
-        max-width: 64rem;
+        max-width: 76rem;
         margin: 0 auto;
-        padding: 2rem 1.25rem 4rem;
+        padding: 0 1.5rem 3rem;
+        font-size: 0.875rem;
       }
       a {
         color: var(--cyan);
         text-decoration: underline;
-        text-underline-offset: 2px;
+        text-decoration-color: #536f78;
+        text-underline-offset: 3px;
       }
       a:hover {
         color: var(--blue);
       }
-      h1 {
-        color: var(--orange);
-        font-size: 1.5rem;
-      }
-      h1::before {
-        content: "# ";
-        color: var(--grey);
-      }
-      h2 {
-        color: var(--cyan);
-        font-size: 1.1rem;
-        margin: 2rem 0 0.75rem;
-      }
-      h2::before {
-        content: "## ";
-        color: var(--grey);
-      }
-      .sub {
-        color: var(--grey);
-        margin: 0.25rem 0 2rem;
-      }
-      .card {
-        background: var(--bg-alt);
-        border: 1px solid var(--border);
-        padding: 1rem 1.25rem;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-        gap: 1rem;
-      }
       .label {
-        color: var(--grey);
-        font-size: 0.75rem;
+        color: #9aa5b5;
+        font-size: 0.67rem;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
       }
       .value {
         color: var(--fg);
@@ -115,32 +55,32 @@
       }
       .status-card {
         display: grid;
-        grid-template-rows: auto 1.8rem auto;
+        grid-template-rows: auto 1fr auto;
         align-items: center;
         gap: 0.25rem;
-      }
-      .status-card .value {
-        font-size: 1.1rem;
+        min-height: 8rem;
       }
       .countdown {
         font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
       }
       table {
         width: 100%;
         border-collapse: collapse;
+        min-width: 38rem;
       }
       th,
       td {
         border-bottom: 1px solid var(--border);
-        padding: 0.4rem 0.5rem;
+        padding: 0.9rem 0.65rem;
         text-align: left;
         font-size: 0.9rem;
       }
       th {
-        color: var(--grey);
+        color: #9aa5b5;
         font-weight: normal;
         text-transform: uppercase;
-        font-size: 0.72rem;
+        font-size: 0.65rem;
         letter-spacing: 0.08em;
       }
       tr:last-child td {
@@ -148,7 +88,7 @@
       }
       .status {
         display: inline-block;
-        padding: 0.05rem 0.5rem;
+        padding: 0;
         font-weight: bold;
       }
       .status-ok,
@@ -166,13 +106,13 @@
         color: var(--grey);
       }
       .status-ok::before {
-        content: "[ ok ]";
+        content: "✓ completed";
       }
       .status-up-to-date::before {
-        content: "[ up-to-date ]";
+        content: "✓ up to date";
       }
       .status-failed::before {
-        content: "[ failed ]";
+        content: "✕ failed";
       }
       .status-running::before {
         content: "[ running ]";
@@ -181,13 +121,13 @@
         content: "[ idle ]";
       }
       .status-unknown::before {
-        content: "[ … ]";
+        content: "— unknown";
       }
       .dot {
         display: inline-block;
         width: 0.6em;
         height: 0.6em;
-        border-radius: 50%;
+        border-radius: 0;
         margin-right: 0.4em;
         vertical-align: baseline;
       }
@@ -206,11 +146,15 @@
         margin-left: 0.5em;
       }
       .tag {
-        display: inline-block;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
         font-size: 0.72rem;
-        padding: 0 0.4rem;
-        margin-right: 0.4em;
+        padding: 0.1rem 0.4rem;
+        margin: 0;
         font-weight: bold;
+        line-height: 1.4;
+        white-space: nowrap;
       }
       .tag-built {
         color: var(--bg);
@@ -236,6 +180,12 @@
       }
       .table-wrap {
         overflow-x: auto;
+      }
+      .card.table-wrap {
+        padding: 0.5rem 1.25rem;
+      }
+      .source-card td {
+        border: 0;
       }
       .attempt-cell {
         white-space: nowrap;
@@ -265,10 +215,6 @@
       footer a:hover {
         color: var(--blue);
       }
-      footer::before {
-        content: "~ ";
-        color: var(--grey);
-      }
       :root {
         color-scheme: dark;
         --bg: #16181a;
@@ -284,16 +230,6 @@
         --magenta: #e878d8;
         --orange: #e3a875;
         --border: #3c4048;
-      }
-      body {
-        max-width: 76rem;
-        padding: 0 1.5rem 3rem;
-        background: var(--bg);
-        font-size: 0.875rem;
-      }
-      a {
-        text-decoration-color: #536f78;
-        text-underline-offset: 3px;
       }
       a:focus-visible {
         outline: 2px solid var(--yellow);
@@ -331,10 +267,8 @@
         font-size: 1.15rem;
         line-height: 1.2;
       }
-      h1::before,
-      h2::before,
-      footer::before {
-        content: none;
+      h2 {
+        margin: 2rem 0 0.75rem;
       }
       .brand small,
       .top-links {
@@ -435,16 +369,9 @@
       .overview .card {
         min-width: 0;
       }
-      .status-card {
-        min-height: 8rem;
-        grid-template-rows: auto 1fr auto;
-      }
       .status-card .value,
       .last-run-value {
         font-size: 1.1rem;
-      }
-      .countdown {
-        letter-spacing: 0.04em;
       }
       .clock-tick {
         display: inline-block;
@@ -471,43 +398,6 @@
           transform: translateY(-3px);
         }
       }
-      .label {
-        color: #9aa5b5;
-        font-size: 0.67rem;
-        letter-spacing: 0.1em;
-      }
-      .status {
-        padding: 0;
-      }
-      .status-ok::before {
-        content: "✓ completed";
-      }
-      .status-up-to-date::before {
-        content: "✓ up to date";
-      }
-      .status-failed::before {
-        content: "✕ failed";
-      }
-      .status-unknown::before {
-        content: "— unknown";
-      }
-      .dot {
-        border-radius: 0;
-      }
-      .table-wrap {
-        padding: 0.5rem 1.25rem;
-      }
-      table {
-        min-width: 38rem;
-      }
-      th,
-      td {
-        padding: 0.9rem 0.65rem;
-      }
-      th {
-        font-size: 0.65rem;
-        color: #9aa5b5;
-      }
       .source-card table {
         min-width: 0;
       }
@@ -530,20 +420,6 @@
       }
       .source-card a {
         overflow-wrap: anywhere;
-      }
-      .tag {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.3rem;
-        margin: 0;
-        padding: 0.1rem 0.4rem;
-        line-height: 1.4;
-        white-space: nowrap;
-      }
-      .tag svg {
-        width: 0.9rem;
-        height: 0.9rem;
-        flex: none;
       }
       footer {
         display: flex;
@@ -610,8 +486,7 @@
           <span id="status" class="status status-unknown last-run-value"></span>
           <span
             id="last-run-detail"
-            class="value"
-            style="color: var(--grey)"
+            class="value muted"
           ></span>
           <div id="error-box" style="display: none">
             <span id="failure-title"></span>
@@ -687,7 +562,7 @@
           </thead>
           <tbody id="systems">
             <tr>
-              <td colspan="5" style="color: var(--grey)">loading…</td>
+              <td colspan="5" class="muted">loading…</td>
             </tr>
           </tbody>
         </table>
@@ -780,6 +655,14 @@
         }
 
         const m = d.manifest || {};
+        const failure = m.status === "failed" ? m.failure : null;
+        renderStatus(d, m, failure);
+        renderSchedule(d);
+        renderSource(d);
+        renderSystems(m, failure);
+      }
+
+      function renderStatus(d, m, failure) {
         const known = ["ok", "failed", "up-to-date", "unknown"];
         const status = known.includes(m.status) ? m.status : "unknown";
         $("status").className = `status status-${status}`;
@@ -787,7 +670,6 @@
           (m.updated_at ? ` · ${epoch(m.updated_at)}` : "") + ago(m.updated_at);
 
         const err = $("error-box");
-        const failure = m.status === "failed" ? m.failure : null;
         if (m.status === "failed") {
           err.style.display = "block";
           $("failure-title").textContent = failure
@@ -809,11 +691,16 @@
             ? `signed${m.revision ? ` · revision ${short(m.revision)}` : ""}${m.status === "failed" ? " · last successful" : ""}`
             : `unsigned${m.revision ? ` · revision ${short(m.revision)}` : ""}${m.status === "failed" ? " · last successful" : ""}`
           : "no lock published yet";
+      }
 
+      function renderSchedule(d) {
         $("schedule-label").textContent = running ? "current run" : "next run";
         $("next-run-at").textContent =
           !running && d.next_run_at ? "at " + epoch(d.next_run_at) : "";
         tick();
+      }
+
+      function renderSource(d) {
         const interval = d.interval_secs;
         const rows = [
           {
@@ -832,7 +719,7 @@
         $("source").innerHTML = rows
           .map(
             ({ k, v }) =>
-              `<tr><td class="label" style="border:0">${esc(k)}</td><td class="value cyan" style="border:0">${v}</td></tr>`,
+              `<tr><td class="label">${esc(k)}</td><td class="value cyan">${v}</td></tr>`,
           )
           .join("");
         $("source-link").href = d.source_url || "#";
@@ -843,7 +730,9 @@
         } else {
           $("release-link").removeAttribute("href");
         }
+      }
 
+      function renderSystems(m, failure) {
         const sys = Array.from(
           new Set([
             ...(m.systems || []),
@@ -883,26 +772,23 @@
         const buildCells = (h) => {
           if (!h) return '<td class="muted">&mdash;</td><td class="muted">&mdash;</td>';
           const action = esc(h.action);
-          const icon = h.action === "cached"
-            ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5h12v8H2zM3 5l1-2h8l1 2M8 7v4m-2-2 2 2 2-2"/></svg>'
-            : "";
           const duration = h.action === "cached" && !h.secs ? "" : dur(h.secs);
           const logLabel = m.status === "failed" && !failure ? "Host log (outcome unknown)" : "Published build log";
           const detail = h.log
             ? `<a href="/logs/${encodeURIComponent(h.log)}" aria-label="${logLabel}${duration ? `, ${duration}` : ""}" title="${logLabel}">${duration || "view log"} ↗</a>`
             : duration || '<span class="muted">&mdash;</span>';
-          return `<td><span class="tag tag-${action}">${icon}${action}</span></td><td>${detail}</td>`;
+          return `<td><span class="tag tag-${action}">${action}</span></td><td>${detail}</td>`;
         };
         $("systems").innerHTML = sys.length
           ? sys
               .map(
                 (s, i) =>
-                  `<tr><td class="value blue">${esc(s)}</td><td class="attempt-cell">${attempt(s)}</td><td style="color: var(--grey)">${
+                  `<tr><td class="value blue">${esc(s)}</td><td class="attempt-cell">${attempt(s)}</td><td class="muted">${
                     esc(outName(outs[i])) || "\u2014"
                   }</td>${buildCells(hostStats[s])}</tr>`,
               )
               .join("")
-          : '<tr><td colspan="5" style="color: var(--grey)">No published host details</td></tr>';
+          : '<tr><td colspan="5" class="muted">No published host details</td></tr>';
       }
 
       function tick() {
