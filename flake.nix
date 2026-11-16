@@ -8,7 +8,8 @@
     let
       systems = [ "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
-      version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
+      cargoVersion = (fromTOML (builtins.readFile ./Cargo.toml)).package.version;
+      version = "${cargoVersion}+${self.shortRev or (self.dirtyShortRev or "dirty")}";
 
       mkPackages =
         system:
@@ -22,7 +23,12 @@
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postInstall = ''
               wrapProgram "$out/bin/flakemill" \
-                --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.curl pkgs.minisign ]}"
+                --prefix PATH : "${
+                  pkgs.lib.makeBinPath [
+                    pkgs.curl
+                    pkgs.minisign
+                  ]
+                }"
             '';
             meta = {
               description = "External update service for Nix flakes";
@@ -45,19 +51,15 @@
       apps = forAllSystems (
         system:
         let
-          packages = mkPackages system;
+          app = {
+            type = "app";
+            program = "${self.packages.${system}.flakemill}/bin/flakemill";
+            meta.description = "Run the flakemill update service";
+          };
         in
         {
-          default = {
-            type = "app";
-            program = "${packages.flakemill}/bin/flakemill";
-            meta.description = "Run the flakemill update service";
-          };
-          flakemill = {
-            type = "app";
-            program = "${packages.flakemill}/bin/flakemill";
-            meta.description = "Run the flakemill update service";
-          };
+          default = app;
+          flakemill = app;
         }
       );
 
