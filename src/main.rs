@@ -125,25 +125,30 @@ fn run_client(cli: &Cli, command: &Command) -> Result<ExitCode> {
     };
 
     match command {
-        Command::Check { quiet } => match client.check().context("checking published lock")? {
-            Check::UpToDate => {
-                if !*quiet {
-                    println!("up to date");
+        Command::Check { quiet } => {
+            let (check, old, new) = client.check().context("checking published lock")?;
+            match check {
+                Check::UpToDate => {
+                    if !*quiet {
+                        println!("up to date");
+                    }
+                    Ok(ExitCode::SUCCESS)
                 }
-                Ok(ExitCode::SUCCESS)
-            }
-            Check::UpdateAvailable => {
-                if !*quiet {
-                    println!("update available");
+                Check::UpdateAvailable => {
+                    if !*quiet {
+                        println!("update available");
+                        print_input_changes(old.as_deref(), &new);
+                    }
+                    Ok(ExitCode::from(1))
                 }
-                Ok(ExitCode::from(1))
             }
-        },
+        }
         Command::Apply { quiet } => {
             let changed = client.apply().context("applying published lock")?;
             if !*quiet {
-                if changed {
+                if let Some((old, new)) = changed {
                     println!("updated {}", client.lock.display());
+                    print_input_changes(old.as_deref(), &new);
                 } else {
                     println!("already up to date");
                 }
@@ -157,6 +162,18 @@ fn run_client(cli: &Cli, command: &Command) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Serve => unreachable!("serve is handled before client dispatch"),
+    }
+}
+
+fn print_input_changes(old: Option<&[u8]>, new: &[u8]) {
+    use std::io::IsTerminal;
+    let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    if let Some(changes) = client::input_changes(old, new, color) {
+        for change in changes {
+            println!("{change}");
+        }
+    } else {
+        eprintln!("could not summarize lockfile input changes");
     }
 }
 
