@@ -106,7 +106,7 @@ impl Client {
     pub fn apply(&self) -> Result<Option<LockfileChange>> {
         let published = self.fetch_verified()?;
         let local = self.local_lock()?;
-        if local.as_deref() == Some(published.as_slice()) {
+        if locks_match(local.as_deref(), &published) {
             return Ok(None);
         }
 
@@ -299,10 +299,31 @@ pub fn input_changes(old: Option<&[u8]>, new: &[u8], color: bool) -> Option<Vec<
 }
 
 fn compare(local: Option<&[u8]>, published: &[u8]) -> Check {
-    if local == Some(published) {
+    if locks_match(local, published) {
         Check::UpToDate
     } else {
         Check::UpdateAvailable
+    }
+}
+
+/// Whether a local lock is already equivalent to the published one.
+///
+/// Bytes first; if they differ, fall back to a parsed JSON comparison so
+/// formatting-only changes (key order, whitespace) don't look like an update.
+fn locks_match(local: Option<&[u8]>, published: &[u8]) -> bool {
+    let Some(local) = local else {
+        return false;
+    };
+    local == published || semantic_lock_eq(local, published)
+}
+
+fn semantic_lock_eq(a: &[u8], b: &[u8]) -> bool {
+    match (
+        serde_json::from_slice::<serde_json::Value>(a),
+        serde_json::from_slice::<serde_json::Value>(b),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
     }
 }
 
@@ -417,5 +438,39 @@ mod tests {
         assert_eq!(compare(None, b"published"), Check::UpdateAvailable);
         assert_eq!(compare(Some(b"old"), b"published"), Check::UpdateAvailable);
         assert_eq!(compare(Some(b"published"), b"published"), Check::UpToDate);
+    }
+
+    #[test]
+    fn compare_tolerates_formatting_only_changes() {
+        // Key order, indentation and whitespace differ; semantics do not.
+        let published =
+            br#"{"root":"r","version":7,"nodes":{"r":{"inputs":{"a":"n"}},"n":{"locked":{"rev":"x","lastModified":1}}}}"#;
+        let pretty = "{\n  \"version\": 7,\n  \"nodes\": {\n    \"n\": { \"locked\": { \"lastModified\": 1, \"rev\": \"x\" } },\n    \"r\": { \"inputs\": { \"a\": \"n\" } }\n  },\n  \"root\": \"r\"\n}";
+        assert_eq!(compare(Some(pretty.as_bytes()), published), Check::UpToDate);
+
+        // A real change is still detected despite identical formatting.
+        let changed = String::from_utf8(published.to_vec())
+            .unwrap()
+            .replace("\"rev\":\"x\"", "\"rev\":\"y\"");
+        assert_eq!(
+            compare(Some(changed.as_bytes()), published),
+            Check::UpdateAvailable
+        );
+    }
+
+    #[test]
+    fn locks_match_handles_edge_cases_and_array_order() {
+        assert!(locks_match(Some(b"same"), b"same"));
+        assert!(!locks_match(None, b"any"));
+        // Non-JSON payloads only match byte-for-byte.
+        assert!(!locks_match(Some(b"not json"), b"also not json"));
+        assert!(locks_match(Some(b"not json"), b"not json"));
+        // A valid lock never matches an unparseable one.
+        assert!(!locks_match(Some(br#"{"root":"r","nodes":{}}"#), b"broken"));
+        // Array order is significant (a follows-target) and must not be
+        // normalised away.
+        let a = br#"{"root":"r","nodes":{"r":{"inputs":{"a":["root","nixpkgs"]}}}}"#;
+        let b = br#"{"root":"r","nodes":{"r":{"inputs":{"a":["nixpkgs","root"]}}}}"#;
+        assert!(!locks_match(Some(a), b));
     }
 }
