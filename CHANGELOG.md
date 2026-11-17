@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/scottmckendry/flakemill/compare/v0.4.0...v0.4.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **dashboard:** clean up html ([aa1381e](https://github.com/scottmckendry/flakemill/commit/aa1381ef968a7763d405160a4e8a78ca3acbdf08))
+* **dashboard:** mobile ux tweaks ([75f530a](https://github.com/scottmckendry/flakemill/commit/75f530a79a63c9bdc8959dd6adaddbf47fc99370))
+
 ## [0.4.0](https://github.com/scottmckendry/flakemill/compare/v0.3.0...v0.4.0) (2026-11-16)
 
 
