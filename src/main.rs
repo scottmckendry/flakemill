@@ -6,21 +6,24 @@
 
 use std::{path::PathBuf, process::ExitCode, time::Duration};
 
+mod atomic;
 mod client;
+mod clock;
 mod cmd;
 mod config;
 mod job;
 mod server;
 #[cfg(test)]
-mod test_support;
+mod testing;
 mod ui;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 use client::{Check, Client};
+use clock::now_secs;
 use config::load_cfg;
-use job::{record_failure, run_job, unix_now};
+use job::{record_failure, run_job};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -230,7 +233,7 @@ fn serve() -> Result<()> {
                     }
 
                     ui.set_running(false);
-                    ui.set_next_run_at(unix_now().saturating_add(cfg.interval.as_secs()));
+                    ui.set_next_run_at(now_secs().saturating_add(cfg.interval.as_secs()));
                     tokio::time::sleep(cfg.interval).await;
                 }
             }

@@ -3,12 +3,12 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
 
+use crate::atomic::write_bytes;
 use crate::cmd::run;
 
 /// A flakemill endpoint plus the local lockfile it should be compared with.
@@ -61,12 +61,12 @@ impl Client {
     /// minisign public key. Unsigned locks are rejected unless no public key
     /// was configured (the explicit dev/PoC escape hatch).
     pub fn fetch_verified(&self) -> Result<Vec<u8>> {
-        let tmp = TempDir::new()?;
-        let lock = tmp.path.join("flake.lock");
+        let tmp = tempfile::TempDir::new()?;
+        let lock = tmp.path().join("flake.lock");
         self.download("flake.lock", &lock)?;
 
         if let Some(public_key) = &self.public_key {
-            let signature = tmp.path.join("flake.lock.minisig");
+            let signature = tmp.path().join("flake.lock.minisig");
             self.download("flake.lock.minisig", &signature)?;
             run(
                 "minisign",
@@ -78,7 +78,7 @@ impl Client {
                     "-p",
                     path_str(public_key)?,
                 ],
-                &tmp.path,
+                tmp.path(),
             )
             .context("verifying flake.lock minisign signature")?;
         } else {
@@ -110,18 +110,7 @@ impl Client {
             return Ok(None);
         }
 
-        let parent = self.lock.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-        let tmp = self.lock.with_file_name(format!(
-            ".{}.flakemill.tmp",
-            self.lock
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("flake.lock")
-        ));
-        fs::write(&tmp, &published).with_context(|| format!("writing {}", tmp.display()))?;
-        fs::rename(&tmp, &self.lock)
-            .with_context(|| format!("replacing {}", self.lock.display()))?;
+        write_bytes(&self.lock, &published)?;
         Ok(Some((local, published)))
     }
 
@@ -129,14 +118,7 @@ impl Client {
     pub fn fetch_to(&self, output: Option<&Path>) -> Result<()> {
         let published = self.fetch_verified()?;
         match output {
-            Some(path) => {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .with_context(|| format!("creating {}", parent.display()))?;
-                }
-                fs::write(path, published)
-                    .with_context(|| format!("writing {}", path.display()))?;
-            }
+            Some(path) => write_bytes(path, &published)?,
             None => {
                 use std::io::Write;
                 std::io::stdout()
@@ -332,37 +314,10 @@ fn path_str(path: &Path) -> Result<&str> {
         .with_context(|| format!("path is not valid UTF-8: {}", path.display()))
 }
 
-struct TempDir {
-    path: PathBuf,
-}
-
-impl TempDir {
-    fn new() -> Result<Self> {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "flakemill-client-{}-{nanos}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&path).with_context(|| format!("creating {}", path.display()))?;
-        Ok(Self { path })
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TempDir;
+    use crate::testing::TempDir;
 
     fn no_network_client(dir: &TempDir) -> Client {
         Client {

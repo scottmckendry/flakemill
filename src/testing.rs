@@ -3,13 +3,10 @@
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
 use crate::config::Cfg;
-
-static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 /// A `Cfg` suitable for tests, with `serve_dir` pointed at `serve_dir` so the
 /// router and manifest helpers read/write the test's temp directory.
@@ -26,28 +23,28 @@ pub fn test_cfg(serve_dir: &Path) -> Cfg {
     }
 }
 
-pub struct TempDir(PathBuf);
+/// Test convenience over `tempfile::TempDir`: labels the directory with the
+/// calling test's name for debuggable `ls /tmp` output, panics on creation
+/// failure (correct in tests), and derefs to `Path` so call sites can
+/// `dir.join(..)` and pass `&dir` where a `&Path` is expected. Auto-removed on
+/// drop by the underlying `tempfile::TempDir`.
+pub struct TempDir(tempfile::TempDir);
 
 impl TempDir {
     pub fn new(label: &str) -> Self {
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("flakemill-{label}-{}-{id}", std::process::id()));
-        std::fs::create_dir_all(&path).expect("create temp dir");
-        Self(path)
+        let prefix = format!("flakemill-{label}-");
+        let dir = tempfile::Builder::new()
+            .prefix(&prefix)
+            .tempdir()
+            .unwrap_or_else(|e| panic!("create temp dir: {e}"));
+        Self(dir)
     }
 }
 
 impl Deref for TempDir {
     type Target = Path;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+    fn deref(&self) -> &Path {
+        self.0.path()
     }
 }

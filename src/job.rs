@@ -5,6 +5,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::atomic::{copy_file, write_bytes};
+use crate::clock::{now_nanos, now_secs};
 use crate::cmd::{run, run_capture, run_probe, run_with_sink};
 use crate::config::Cfg;
 
@@ -82,14 +84,7 @@ pub fn read_manifest(serve_dir: &Path) -> Option<Manifest> {
 }
 
 pub fn write_manifest(serve_dir: &Path, m: &Manifest) -> Result<()> {
-    std::fs::create_dir_all(serve_dir)
-        .with_context(|| format!("creating {}", serve_dir.display()))?;
-    let tmp = serve_dir.join("manifest.json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec(m)?)
-        .with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, serve_dir.join("manifest.json"))
-        .with_context(|| format!("replacing {}", serve_dir.join("manifest.json").display()))?;
-    Ok(())
+    write_bytes(&serve_dir.join("manifest.json"), &serde_json::to_vec(m)?)
 }
 
 /// Record a failed run while preserving the last-known-good revision and
@@ -111,18 +106,11 @@ pub fn record_failure(
                 .map(|p| p.toplevels.clone())
                 .unwrap_or_default(),
             hosts: prev.as_ref().map(|p| p.hosts.clone()).unwrap_or_default(),
-            updated_at: unix_now().to_string(),
+            updated_at: now_secs().to_string(),
             error: Some(error.into()),
             failure,
         },
     )
-}
-
-pub fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 fn files_equal(a: &Path, b: &Path) -> bool {
@@ -209,7 +197,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
                             .cloned()
                     })
                     .collect(),
-                updated_at: unix_now().to_string(),
+                updated_at: now_secs().to_string(),
                 error: None,
                 failure: None,
             },
@@ -237,14 +225,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
         let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)
             .map_err(|e| e.context(failure("evaluation", None)))?;
         // Do not overwrite logs referenced by the last published manifest.
-        let log_name = format!(
-            "{}-{}.log",
-            system,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        );
+        let log_name = format!("{}-{}.log", system, now_nanos());
         let log_path = logs_dir.join(&log_name);
         let cache_store = format!("https://{}.cachix.org", cfg.cache_name);
         let (cached, probe_err) =
@@ -308,12 +289,8 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
         .collect();
     run("cachix", &args, work)?;
 
-    // 5. Publish signed lock (atomic) --------------------------------------------
-    let tmp = cfg.serve_dir.join("flake.lock.tmp");
-    std::fs::copy(&lock, &tmp)
-        .with_context(|| format!("copying {} to {}", lock.display(), tmp.display()))?;
-    std::fs::rename(&tmp, &published_lock)
-        .with_context(|| format!("replacing {}", published_lock.display()))?;
+    // 5. Publish signed lock (atomic) -------------------------------------------
+    copy_file(&lock, &published_lock)?;
     if let Some(key) = &cfg.sign_key {
         let key = key
             .to_str()
@@ -342,7 +319,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
             systems: cfg.systems.clone(),
             toplevels,
             hosts,
-            updated_at: unix_now().to_string(),
+            updated_at: now_secs().to_string(),
             error: None,
             failure: None,
         },
@@ -352,7 +329,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TempDir;
+    use crate::testing::TempDir;
 
     fn sample_manifest() -> Manifest {
         Manifest {
@@ -403,7 +380,15 @@ mod tests {
         write_manifest(&dir, &first).unwrap();
 
         assert_eq!(read_manifest(&dir), Some(first));
-        assert!(!dir.join("manifest.json.tmp").exists());
+        let leftovers: Vec<_> = std::fs::read_dir(&*dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            leftovers,
+            vec!["manifest.json".to_string()],
+            "{leftovers:?}"
+        );
     }
 
     #[test]

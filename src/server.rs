@@ -171,7 +171,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::test_support::{test_cfg, TempDir};
+    use crate::testing::{test_cfg, TempDir};
 
     fn request(uri: &str) -> Request<Body> {
         Request::builder().uri(uri).body(Body::empty()).unwrap()

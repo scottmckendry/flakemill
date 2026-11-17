@@ -108,7 +108,7 @@ pub fn run_capture(cmd: &str, args: &[&str], cwd: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TempDir;
+    use crate::testing::TempDir;
 
     #[test]
     fn run_captures_both_output_streams() {

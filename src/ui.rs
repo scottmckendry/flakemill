@@ -125,7 +125,7 @@ mod tests {
     use super::*;
     use crate::{
         job::Manifest,
-        test_support::{test_cfg, TempDir},
+        testing::{test_cfg, TempDir},
     };
 
     #[test]
