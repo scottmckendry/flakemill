@@ -4,7 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>flakemill</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext x='32' y='50' text-anchor='middle' font-size='56' fill='%237ed8e8'%3E%E2%9D%84%3C/text%3E%3C/svg%3E" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext x='32' y='50' text-anchor='middle' font-size='56' fill='%237ed8e8'%3E%E2%9D%84%3C/text%3E%3C/svg%3E"
+    />
     <style>
       * {
         box-sizing: border-box;
@@ -187,8 +190,23 @@
       .source-card td {
         border: 0;
       }
-      .attempt-cell {
+      .attempt-cell,
+      .fleet-table td[data-label="host"] {
         white-space: nowrap;
+      }
+      .fleet-table td[data-label="host"] {
+        overflow-wrap: normal;
+      }
+      #last-run-detail {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0 0.6em;
+      }
+      #last-run-detail span::before {
+        content: "· ";
+      }
+      .footer-detail::before {
+        content: "· ";
       }
       #live-log-link {
         color: var(--blue);
@@ -363,7 +381,7 @@
       }
       .overview {
         display: grid;
-        grid-template-columns: 1.25fr 1fr 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 1rem;
       }
       .overview .card {
@@ -372,6 +390,9 @@
       .status-card .value,
       .last-run-value {
         font-size: 1.1rem;
+      }
+      .status-card #last-run-detail {
+        font-size: 0.75rem;
       }
       .clock-tick {
         display: inline-block;
@@ -446,6 +467,69 @@
         .source-card tbody {
           grid-template-columns: 1fr;
         }
+        .source-card tr {
+          grid-template-columns: 4.5rem minmax(0, 1fr);
+        }
+        .fleet-table {
+          min-width: 0;
+        }
+        .fleet-table thead {
+          display: none;
+        }
+        .fleet-table tr {
+          display: block;
+          padding: 0.75rem 0;
+          border-bottom: 1px solid var(--border);
+        }
+        .fleet-table tr:last-child {
+          border-bottom: 0;
+        }
+        .fleet-table td {
+          display: grid;
+          grid-template-columns: 8rem minmax(0, 1fr);
+          gap: 0.5rem;
+          padding: 0.2rem 0;
+          border: 0;
+          overflow-wrap: anywhere;
+        }
+        .fleet-table td[colspan] {
+          display: block;
+        }
+        .fleet-table .attempt-cell,
+        .fleet-table td[data-label="host"] {
+          white-space: normal;
+        }
+        .fleet-table td[data-label="host"] {
+          overflow-wrap: anywhere;
+        }
+        .fleet-table td[data-label="published output"] {
+          display: none;
+        }
+        .fleet-table td[data-label]::before {
+          content: attr(data-label);
+          color: #9aa5b5;
+          font-size: 0.65rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+        #last-run-detail {
+          flex-direction: column;
+        }
+        #last-run-detail span::before,
+        .footer-detail::before {
+          content: none;
+        }
+        footer {
+          display: grid;
+          grid-template-columns: auto 1fr;
+          gap: 0.1rem 0.5rem;
+        }
+        .footer-flake {
+          margin-right: 0;
+        }
+        .footer-detail {
+          grid-column: 2;
+        }
         .status-card {
           min-height: 7rem;
         }
@@ -465,7 +549,12 @@
       <div class="snow" aria-hidden="true">
         <span>❄</span><span>·</span><span>❄</span><span>·</span><span>❄</span>
       </div>
-      <a id="source-link" class="brand" target="_blank" rel="noopener noreferrer">
+      <a
+        id="source-link"
+        class="brand"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         <span class="brand-mark" aria-hidden="true">❄</span>
         <h1>flakemill</h1>
       </a>
@@ -484,10 +573,7 @@
         <div class="card status-card">
           <span class="label">last run</span>
           <span id="status" class="status status-unknown last-run-value"></span>
-          <span
-            id="last-run-detail"
-            class="value muted"
-          ></span>
+          <span id="last-run-detail" class="value muted"></span>
           <div id="error-box" style="display: none">
             <span id="failure-title"></span>
             <span id="failure-link"></span>
@@ -546,7 +632,7 @@
         <h2>fleet</h2>
       </div>
       <div class="card table-wrap">
-        <table>
+        <table class="fleet-table">
           <thead>
             <tr>
               <th>host</th>
@@ -579,10 +665,16 @@
       </div>
     </main>
     <footer>
-      <span class="footer-flake" aria-hidden="true">❄</span> uptime
-      <span id="uptime">&mdash;</span> &middot;
-      <span id="refresh-state" title="Refreshes every 15s">connecting…</span>
-      <span id="build-version" hidden> · <a id="release-link" target="_blank" rel="noopener noreferrer"></a></span>
+      <span class="footer-flake" aria-hidden="true">❄</span
+      ><span>uptime <span id="uptime">&mdash;</span></span>
+      <span class="footer-detail"
+        ><span id="refresh-state" title="Refreshes every 15s"
+          >connecting…</span
+        ></span
+      >
+      <span id="build-version" class="footer-detail" hidden
+        ><a id="release-link" target="_blank" rel="noopener noreferrer"></a
+      ></span>
     </footer>
 
     <script>
@@ -609,6 +701,15 @@
         const m = scpLike || sshUrl;
         const href = m ? `https://${m[1]}/${m[2]}` : u;
         return href.replace(/\.git\/?$/, "");
+      };
+      const repoLabel = (u) => {
+        const href = repoHref(u);
+        const github = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/?$/i.exec(
+          href,
+        );
+        return github
+          ? `github:${github[1]}/${github[2]}`
+          : href.replace(/^https?:\/\//, "");
       };
       const ago = (s) => {
         if (!s) return "";
@@ -665,9 +766,11 @@
       function renderStatus(d, m, failure) {
         const known = ["ok", "failed", "up-to-date", "unknown"];
         const status = known.includes(m.status) ? m.status : "unknown";
-        $("status").className = `status status-${status}`;
-        $("last-run-detail").textContent =
-          (m.updated_at ? ` · ${epoch(m.updated_at)}` : "") + ago(m.updated_at);
+        $("status").className = `status status-${status} last-run-value`;
+        const elapsed = ago(m.updated_at).replace(/^ · /, "");
+        $("last-run-detail").innerHTML = m.updated_at
+          ? `<span>${esc(epoch(m.updated_at))}</span>${elapsed ? `<span>${esc(elapsed)}</span>` : ""}`
+          : "";
 
         const err = $("error-box");
         if (m.status === "failed") {
@@ -706,7 +809,7 @@
           {
             k: "repo",
             v: d.repo_url
-              ? `<a href="${esc(repoHref(d.repo_url))}" target="_blank" rel="noopener noreferrer">${esc(d.repo_url)}</a>`
+              ? `<a href="${esc(repoHref(d.repo_url))}" target="_blank" rel="noopener noreferrer" title="${esc(d.repo_url)}">${esc(repoLabel(d.repo_url))}</a>`
               : "\u2014",
           },
           { k: "branch", v: esc(d.branch || "\u2014") },
@@ -726,7 +829,8 @@
         $("build-version").hidden = !d.version;
         $("release-link").textContent = d.version ? `v${d.version}` : "";
         if (d.source_url && d.version) {
-          $("release-link").href = `${d.source_url.replace(/\/$/, "")}/releases/tag/${encodeURIComponent(`v${d.version}`)}`;
+          $("release-link").href =
+            `${d.source_url.replace(/\/$/, "")}/releases/tag/${encodeURIComponent(`v${d.version}`)}`;
         } else {
           $("release-link").removeAttribute("href");
         }
@@ -770,22 +874,26 @@
           return '<span class="muted">Unknown</span>';
         };
         const buildCells = (h) => {
-          if (!h) return '<td class="muted">&mdash;</td><td class="muted">&mdash;</td>';
+          if (!h)
+            return '<td data-label="published build" class="muted">&mdash;</td><td data-label="duration / log" class="muted">&mdash;</td>';
           const action = esc(h.action);
           const duration = h.action === "cached" && !h.secs ? "" : dur(h.secs);
-          const logLabel = m.status === "failed" && !failure ? "Host log (outcome unknown)" : "Published build log";
+          const logLabel =
+            m.status === "failed" && !failure
+              ? "Host log (outcome unknown)"
+              : "Published build log";
           const detail = h.log
             ? `<a href="/logs/${encodeURIComponent(h.log)}" aria-label="${logLabel}${duration ? `, ${duration}` : ""}" title="${logLabel}">${duration || "view log"} ↗</a>`
             : duration || '<span class="muted">&mdash;</span>';
-          return `<td><span class="tag tag-${action}">${action}</span></td><td>${detail}</td>`;
+          return `<td data-label="published build"><span><span class="tag tag-${action}">${action}</span></span></td><td data-label="duration / log"><span>${detail}</span></td>`;
         };
         $("systems").innerHTML = sys.length
           ? sys
               .map(
                 (s, i) =>
-                  `<tr><td class="value blue">${esc(s)}</td><td class="attempt-cell">${attempt(s)}</td><td class="muted">${
+                  `<tr><td data-label="host" class="value blue"><span>${esc(s)}</span></td><td data-label="latest attempt" class="attempt-cell"><span>${attempt(s)}</span></td><td data-label="published output" class="muted"><span>${
                     esc(outName(outs[i])) || "\u2014"
-                  }</td>${buildCells(hostStats[s])}</tr>`,
+                  }</span></td>${buildCells(hostStats[s])}</tr>`,
               )
               .join("")
           : '<tr><td colspan="5" class="muted">No published host details</td></tr>';
