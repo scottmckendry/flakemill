@@ -192,7 +192,7 @@ fn serve() -> Result<()> {
 
         let addr = std::env::var("LISTEN").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
         let ui = ui::UiState::new(&cfg.serve_dir);
-        let app = server::build_router(&cfg.serve_dir, &cfg, ui.clone());
+        let app = server::build_router(&cfg, ui.clone());
 
         tokio::spawn({
             let cfg = cfg.clone();

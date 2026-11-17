@@ -71,8 +71,9 @@ fn valid_log_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-pub fn build_router(serve_dir: &std::path::Path, cfg: &Cfg, ui: UiState) -> axum::Router {
-    let serve_dir = std::sync::Arc::new(serve_dir.to_path_buf());
+pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
+    let cfg = std::sync::Arc::new(cfg.clone());
+    let serve_dir = std::sync::Arc::new(cfg.serve_dir.clone());
     let file_route = |path: &'static str, content_type: &'static str| {
         let dir = serve_dir.clone();
         axum::routing::get(move || {
@@ -80,7 +81,6 @@ pub fn build_router(serve_dir: &std::path::Path, cfg: &Cfg, ui: UiState) -> axum
             async move { serve_file(&dir, path, content_type) }
         })
     };
-    let cfg = std::sync::Arc::new(cfg.clone());
     axum::Router::new()
         .route(
             "/",
@@ -163,8 +163,6 @@ pub fn build_router(serve_dir: &std::path::Path, cfg: &Cfg, ui: UiState) -> axum
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
-
     use axum::{
         body::Body,
         http::{Request, StatusCode},
@@ -173,20 +171,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::test_support::TempDir;
-
-    fn test_cfg() -> Cfg {
-        Cfg {
-            repo_url: "https://example.invalid/repo".into(),
-            branch: "main".into(),
-            work_dir: PathBuf::from("/tmp/work"),
-            serve_dir: PathBuf::from("/tmp/serve"),
-            systems: vec!["eris".into()],
-            cache_name: "cache".into(),
-            sign_key: None,
-            interval: Duration::from_secs(60),
-        }
-    }
+    use crate::test_support::{test_cfg, TempDir};
 
     fn request(uri: &str) -> Request<Body> {
         Request::builder().uri(uri).body(Body::empty()).unwrap()
@@ -227,7 +212,7 @@ mod tests {
         std::fs::write(dir.join("manifest.json"), br#"{"status":"ok"}"#).unwrap();
         std::fs::write(dir.join("flake.lock.minisig"), b"signature\n").unwrap();
 
-        let app = build_router(&dir, &test_cfg(), UiState::new(&dir));
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
 
         let response = app.clone().oneshot(request("/flake.lock")).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -260,7 +245,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("logs")).unwrap();
         std::fs::write(dir.join("logs/eris.log"), b"build output\n").unwrap();
 
-        let app = build_router(&dir, &test_cfg(), UiState::new(&dir));
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
 
         let response = app
             .clone()
@@ -285,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn serves_live_log_page() {
         let dir = TempDir::new("server-live-log-page");
-        let app = build_router(&dir, &test_cfg(), UiState::new(&dir));
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
         let response = app.oneshot(request("/live-log")).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -302,7 +287,7 @@ mod tests {
         let mut bytes = vec![b'x'; TAIL_BYTES as usize + 100];
         bytes.extend_from_slice(b"end\n");
         std::fs::write(dir.join("logs/eris.log"), bytes).unwrap();
-        let app = build_router(&dir, &test_cfg(), UiState::new(&dir));
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
         let response = app
             .clone()
             .oneshot(request("/log-tail/eris.log"))
@@ -326,7 +311,7 @@ mod tests {
     #[tokio::test]
     async fn missing_files_and_health_endpoint() {
         let dir = TempDir::new("server-missing");
-        let app = build_router(&dir, &test_cfg(), UiState::new(&dir));
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
 
         let response = app.clone().oneshot(request("/flake.lock")).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);

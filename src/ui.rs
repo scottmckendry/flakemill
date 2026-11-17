@@ -122,23 +122,11 @@ pub fn index_html() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
-
     use super::*;
-    use crate::{config::Cfg, job::Manifest, test_support::TempDir};
-
-    fn test_cfg() -> Cfg {
-        Cfg {
-            repo_url: "https://example.invalid/repo".into(),
-            branch: "main".into(),
-            work_dir: PathBuf::from("/tmp/work"),
-            serve_dir: PathBuf::from("/tmp/serve"),
-            systems: vec!["eris".into()],
-            cache_name: "cache".into(),
-            sign_key: None,
-            interval: Duration::from_secs(300),
-        }
-    }
+    use crate::{
+        job::Manifest,
+        test_support::{test_cfg, TempDir},
+    };
 
     #[test]
     fn ui_json_reports_manifest_and_runtime_state() {
@@ -161,7 +149,7 @@ mod tests {
         state.set_running(true);
         state.set_active_build("eris", "eris.log");
         state.set_next_run_at(123);
-        let value = ui_json(&state, &test_cfg());
+        let value = ui_json(&state, &test_cfg(&dir));
 
         assert_eq!(value["manifest"]["status"], "up-to-date");
         assert_eq!(value["manifest"]["revision"], "abc123");
@@ -171,7 +159,7 @@ mod tests {
         assert_eq!(value["active_build"]["host"], "eris");
         assert_eq!(value["active_build"]["log"], "eris.log");
         state.set_running(false);
-        assert!(ui_json(&state, &test_cfg())["active_build"].is_null());
+        assert!(ui_json(&state, &test_cfg(&dir))["active_build"].is_null());
         assert_eq!(value["next_run_at"], 123);
         assert_eq!(value["repo_url"], "https://example.invalid/repo");
         assert_eq!(
@@ -188,7 +176,7 @@ mod tests {
     #[test]
     fn ui_json_handles_a_fresh_install() {
         let dir = TempDir::new("ui-empty");
-        let value = ui_json(&UiState::new(&dir), &test_cfg());
+        let value = ui_json(&UiState::new(&dir), &test_cfg(&dir));
 
         assert_eq!(value["manifest"], serde_json::json!({}));
         assert_eq!(value["serving"], false);
