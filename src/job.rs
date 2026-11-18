@@ -225,11 +225,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
     // 2. Update lock ----------------------------------------------------------
     let lock = work.join("flake.lock");
     let published_lock = cfg.serve_dir.join("flake.lock");
-    run(
-        "nix",
-        &["flake", "update", "--flake", ".", "--refresh"],
-        work,
-    )?;
+    run("nix", &["flake", "update", "--refresh"], work)?;
 
     // Compare the *updated* lock against the last published one. The committed
     // lock in the repo may be identical to what we published even when upstream
