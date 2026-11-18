@@ -12,7 +12,6 @@
 
 <img width="1192" height="658" alt="1794867522400066767" src="https://github.com/user-attachments/assets/a4ef57e4-6b6c-47a6-a74a-68a0b211329c" />
 
-
 An external update service for [Nix flakes](https://nixos.wiki/wiki/Flakes): refresh a lockfile, build your systems, and serve the verified result for hosts to apply on their own schedule.
 
 - **Build before publishing.** A new lock is served only after all configured systems build and their results are pushed to [Cachix](https://cachix.org).
@@ -116,6 +115,10 @@ Configure the server with environment variables. Set `SIGN_KEY` to publish signe
 | `INTERVAL_SECS`     | `21600`                    | Seconds between update runs (must be greater than zero)                        |
 | `LISTEN`            | `0.0.0.0:8080`             | HTTP listen address                                                            |
 | `NIX_CONFIG`        |                            | Extra nix.conf lines, e.g. `access-tokens` for private inputs (`secrets/.env`) |
+
+> [!NOTE]
+> Flakemill keeps the latest published systems in the Nix store and removes unused paths after successful updates.
+> GC affects the whole store, so take care if sharing it with other services.
 
 ### cache setup
 

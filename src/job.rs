@@ -129,6 +129,72 @@ fn is_cache_miss(stderr: &str) -> bool {
     stderr.contains("is not valid") || stderr.contains("cannot substitute")
 }
 
+/// Create an empty generation directory for the indirect GC roots of one
+/// publication candidate. Older generations stay live until the new one is
+/// published; roots are registered under `/nix/var/nix/gcroots/auto`, so they
+/// survive restarts and protect closures from concurrent GC.
+fn new_generation(serve_dir: &Path) -> Result<std::path::PathBuf> {
+    let roots = serve_dir.join("gc-roots");
+    std::fs::create_dir_all(&roots)?;
+    let roots = roots
+        .canonicalize()
+        .context("resolving GC roots directory")?;
+    Ok(tempfile::Builder::new()
+        .prefix("generation-")
+        .tempdir_in(&roots)?
+        .keep())
+}
+
+/// Root a store path inside `generation` at `index`. `nix build` on a valid
+/// path is free: no rebuild, fetches only if missing locally.
+fn root_one(work: &Path, generation: &Path, index: usize, path: &str) -> Result<()> {
+    let link = generation.join(index.to_string());
+    let link = link.to_str().context("GC root path is not valid UTF-8")?;
+    run("nix", &["build", path, "--out-link", link], work)
+        .with_context(|| format!("rooting {path}"))
+}
+
+/// Retire older generations after the new one is published, collecting
+/// individual failures so one stuck directory doesn't block GC. Paths are
+/// canonicalized so a symlinked `serve_dir` can't alias the live generation.
+fn remove_old_generations(serve_dir: &Path, current: &Path) -> Result<()> {
+    let roots = serve_dir.join("gc-roots").canonicalize()?;
+    let current = current
+        .canonicalize()
+        .with_context(|| format!("resolving current generation {}", current.display()))?;
+    let mut failed = Vec::new();
+    for entry in std::fs::read_dir(&roots)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.canonicalize().ok().as_deref() == Some(current.as_path()) {
+            continue;
+        }
+        if path
+            .file_name()
+            .map(|n| n.to_string_lossy().starts_with("generation-"))
+            .unwrap_or(false)
+            && entry.file_type()?.is_dir()
+            && std::fs::remove_dir_all(&path).is_err()
+        {
+            failed.push(path);
+        }
+    }
+    if !failed.is_empty() {
+        anyhow::bail!("could not remove {} stale generation(s)", failed.len());
+    }
+    Ok(())
+}
+
+fn collect_after_publish(serve_dir: &Path, work: &Path, current: &Path) {
+    // Retiring is best-effort; stale roots are pruned by the GC anyway.
+    if let Err(e) = remove_old_generations(serve_dir, current) {
+        log::warn!("retiring old GC generations failed; GC will prune stale roots: {e:#}");
+    }
+    if let Err(e) = run("nix-store", &["--gc"], work) {
+        log::warn!("Nix store garbage collection failed; will retry: {e:#}");
+    }
+}
+
 pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
     // Previous manifest, if any. Used to keep the last-known toplevels/hosts
     // in the dashboard when a run is up-to-date or fails.
@@ -174,12 +240,13 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
         // the dashboard's top-level column stays populated even when the lock
         // hasn't changed for a long time.
         let mut toplevels = Vec::new();
-        for system in &cfg.systems {
+        let generation = new_generation(&cfg.serve_dir)?;
+        for (index, system) in cfg.systems.iter().enumerate() {
             let attr = toplevel_attr(system);
-            toplevels.push(
-                run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)
-                    .map_err(|e| e.context(format!("evaluating toplevel for {system}")))?,
-            );
+            let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)
+                .map_err(|e| e.context(format!("evaluating toplevel for {system}")))?;
+            root_one(work, &generation, index, &out)?;
+            toplevels.push(out);
         }
         write_manifest(
             &cfg.serve_dir,
@@ -202,12 +269,14 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
                 failure: None,
             },
         )?;
+        collect_after_publish(&cfg.serve_dir, work, &generation);
         return Ok(());
     }
 
     // 3. Build every system ---------------------------------------------------
     let logs_dir = cfg.serve_dir.join("logs");
     std::fs::create_dir_all(&logs_dir)?;
+    let generation = new_generation(&cfg.serve_dir)?;
 
     let mut toplevels = Vec::new();
     let mut hosts = Vec::new();
@@ -279,7 +348,10 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
                 secs: host_start.elapsed().as_secs(),
             });
         }
-        toplevels.push(out);
+        let index = toplevels.len();
+        toplevels.push(out.clone());
+        // Root now so concurrent GC can't collect it while later systems build.
+        root_one(work, &generation, index, &out)?;
     }
 
     // 4. Push to cachix ---------------------------------------------------------
@@ -323,7 +395,9 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
             error: None,
             failure: None,
         },
-    )
+    )?;
+    collect_after_publish(&cfg.serve_dir, work, &generation);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -448,6 +522,22 @@ mod tests {
         std::fs::write(&b, b"different").unwrap();
         assert!(!files_equal(&a, &b));
         assert!(!files_equal(&a, &dir.join("missing")));
+    }
+
+    #[test]
+    fn cleanup_preserves_current_generation_and_unrelated_files() {
+        let dir = TempDir::new("gc-roots");
+        let roots = dir.join("gc-roots");
+        let current = roots.join("generation-current");
+        let old = roots.join("generation-old");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("root"), "old").unwrap();
+        std::fs::write(roots.join("unrelated"), "keep").unwrap();
+        remove_old_generations(&dir, &current).unwrap();
+        assert!(current.exists());
+        assert!(!old.exists());
+        assert!(roots.join("unrelated").exists());
     }
 
     #[test]
