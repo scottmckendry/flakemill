@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.2](https://github.com/scottmckendry/flakemill/compare/v0.4.1...v0.4.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* **client:** compare locks semantically ([0a5b74f](https://github.com/scottmckendry/flakemill/commit/0a5b74fc8f8cf8b9c74c2c5c719fbd71596f5141))
+* **container:** set user before cachix ([76172c3](https://github.com/scottmckendry/flakemill/commit/76172c3a1d3c5d0e14ef7ed23a2d521b7a9af24e))
+* **job:** add active build guard ([93c846e](https://github.com/scottmckendry/flakemill/commit/93c846efd830641ba36522fe05a6bd2773483b13))
+* **nix:** add gc to the end of each build ([a118635](https://github.com/scottmckendry/flakemill/commit/a118635fa24f4224bfc273e8606876052737246f))
+* **nix:** deprecated flake arg ([65c4aa4](https://github.com/scottmckendry/flakemill/commit/65c4aa414db7a61c0e03736390fb592c76226bb1))
+
 ## [0.4.1](https://github.com/scottmckendry/flakemill/compare/v0.4.0...v0.4.1) (2026-11-17)
 
 
