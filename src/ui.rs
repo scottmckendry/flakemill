@@ -22,6 +22,22 @@ pub struct ActiveBuild {
     pub log: String,
 }
 
+/// Clears the dashboard's live-build marker when dropped. Obtained from
+/// [`UiState::active_build_guard`]; each live build holds one for its duration,
+/// so the marker always tracks the currently running build.
+pub struct ActiveBuildGuard {
+    inner: Arc<Mutex<Inner>>,
+}
+
+impl Drop for ActiveBuildGuard {
+    fn drop(&mut self) {
+        // Tolerate a poisoned lock: dropping during unwind must never panic.
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.active_build = None;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct UiState {
     inner: Arc<Mutex<Inner>>,
@@ -39,22 +55,23 @@ impl UiState {
     }
 
     pub fn set_running(&self, running: bool) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.running = running;
-        if !running {
-            inner.active_build = None;
-        }
+        self.inner.lock().unwrap().running = running;
     }
 
-    pub fn set_active_build(&self, host: &str, log: &str) {
+    /// Mark `host`/`log` as the live build and return a guard that clears the
+    /// marker when it goes out of scope. Clearing is guaranteed on every exit
+    /// path from the build, including an early `?` return when `nix build`
+    /// fails, so a stale live-build link cannot linger.
+    #[must_use = "the guard clears the live-build marker when dropped; bind it \
+                  to a name (e.g. `let _b = …`) to keep it alive for the build"]
+    pub fn active_build_guard(&self, host: &str, log: &str) -> ActiveBuildGuard {
         self.inner.lock().unwrap().active_build = Some(ActiveBuild {
             host: host.into(),
             log: log.into(),
         });
-    }
-
-    pub fn clear_active_build(&self) {
-        self.inner.lock().unwrap().active_build = None;
+        ActiveBuildGuard {
+            inner: Arc::clone(&self.inner),
+        }
     }
 
     pub fn set_next_run_at(&self, at: u64) {
@@ -147,7 +164,7 @@ mod tests {
 
         let state = UiState::new(&dir);
         state.set_running(true);
-        state.set_active_build("eris", "eris.log");
+        let active = state.active_build_guard("eris", "eris.log");
         state.set_next_run_at(123);
         let value = ui_json(&state, &test_cfg(&dir));
 
@@ -158,7 +175,10 @@ mod tests {
         assert_eq!(value["running"], true);
         assert_eq!(value["active_build"]["host"], "eris");
         assert_eq!(value["active_build"]["log"], "eris.log");
+        // The guard owns the live-build marker: dropping it clears the link.
         state.set_running(false);
+        assert!(!ui_json(&state, &test_cfg(&dir))["active_build"].is_null());
+        drop(active);
         assert!(ui_json(&state, &test_cfg(&dir))["active_build"].is_null());
         assert_eq!(value["next_run_at"], 123);
         assert_eq!(value["repo_url"], "https://example.invalid/repo");

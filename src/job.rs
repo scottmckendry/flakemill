@@ -328,7 +328,9 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
         } else {
             let mut log_file = std::fs::File::create(&log_path)
                 .with_context(|| format!("creating {}", log_path.display()))?;
-            ui.set_active_build(system, &log_name);
+            // The guard clears the live-build marker on scope exit, so the
+            // early `?` return below (a failed build) can't leave a stale link.
+            let _active_build = ui.active_build_guard(system, &log_name);
             let mut sink = |stream: &str, line: &str| {
                 use std::io::Write;
                 let _ = writeln!(log_file, "[{stream}] {line}");
@@ -347,7 +349,6 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
                 Some(&mut sink),
             )
             .map_err(|e| e.context(failure("build", Some(log_name.clone()))))?;
-            ui.clear_active_build();
             hosts.push(HostStat {
                 name: system.clone(),
                 action: HostAction::Built,
