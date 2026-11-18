@@ -124,7 +124,7 @@ pub fn index_html() -> String {
 mod tests {
     use super::*;
     use crate::{
-        job::Manifest,
+        job::{Manifest, Status},
         testing::{test_cfg, TempDir},
     };
 
@@ -132,7 +132,7 @@ mod tests {
     fn ui_json_reports_manifest_and_runtime_state() {
         let dir = TempDir::new("ui-json");
         let manifest = Manifest {
-            status: "up-to-date".into(),
+            status: Status::UpToDate,
             revision: Some("abc123".into()),
             systems: vec!["eris".into()],
             toplevels: vec!["/nix/store/abc-system".into()],

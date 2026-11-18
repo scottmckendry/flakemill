@@ -10,9 +10,20 @@ use crate::clock::{now_nanos, now_secs};
 use crate::cmd::{run, run_capture, run_probe, run_with_sink};
 use crate::config::Cfg;
 
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Status {
+    /// A full sync + update + build + publish run succeeded.
+    Ok,
+    /// The run failed; `Manifest::failure` may carry the partial outcome.
+    Failed,
+    /// The refreshed lock matched the published one, so nothing was built.
+    UpToDate,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Manifest {
-    pub status: String, // "ok" | "failed" | "up-to-date"
+    pub status: Status,
     pub revision: Option<String>,
     pub systems: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -98,7 +109,7 @@ pub fn record_failure(
     write_manifest(
         serve_dir,
         &Manifest {
-            status: "failed".into(),
+            status: Status::Failed,
             revision: prev.as_ref().and_then(|p| p.revision.clone()),
             systems: prev.as_ref().map(|p| p.systems.clone()).unwrap_or_default(),
             toplevels: prev
@@ -247,7 +258,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
         write_manifest(
             &cfg.serve_dir,
             &Manifest {
-                status: "up-to-date".into(),
+                status: Status::UpToDate,
                 revision: Some(rev),
                 systems: cfg.systems.clone(),
                 toplevels,
@@ -382,7 +393,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
     write_manifest(
         &cfg.serve_dir,
         &Manifest {
-            status: "ok".into(),
+            status: Status::Ok,
             revision: Some(rev),
             systems: cfg.systems.clone(),
             toplevels,
@@ -403,7 +414,7 @@ mod tests {
 
     fn sample_manifest() -> Manifest {
         Manifest {
-            status: "ok".into(),
+            status: Status::Ok,
             revision: Some("abc123".into()),
             systems: vec!["eris".into()],
             toplevels: vec!["/nix/store/abc-system".into()],
@@ -445,7 +456,7 @@ mod tests {
         let dir = TempDir::new("manifest-replace");
         let mut first = sample_manifest();
         write_manifest(&dir, &first).unwrap();
-        first.status = "up-to-date".into();
+        first.status = Status::UpToDate;
         first.hosts.clear();
         write_manifest(&dir, &first).unwrap();
 
@@ -470,7 +481,7 @@ mod tests {
         record_failure(&dir, "boom", None).unwrap();
         let failed = read_manifest(&dir).unwrap();
 
-        assert_eq!(failed.status, "failed");
+        assert_eq!(failed.status, Status::Failed);
         assert_eq!(failed.revision, previous.revision);
         assert_eq!(failed.systems, previous.systems);
         assert_eq!(failed.toplevels, previous.toplevels);
