@@ -1,6 +1,8 @@
 //! Read-only dashboard: shared run state, `/` page, and `/ui.json`.
 
 use std::{
+    ffi::CString,
+    os::unix::ffi::OsStrExt,
     path::Path,
     sync::{Arc, Mutex},
     time::Instant,
@@ -79,6 +81,32 @@ impl UiState {
     }
 }
 
+/// Capacity of the filesystem containing a path, not the size of the directory.
+#[derive(Serialize)]
+struct Storage {
+    total_bytes: u64,
+    available_bytes: u64,
+    used_bytes: u64,
+}
+
+fn storage(path: &Path) -> Option<Storage> {
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // statvfs initializes stats on success and does not retain either pointer.
+    if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    let stats = unsafe { stats.assume_init() };
+    let block_size = stats.f_frsize as u64;
+    Some(Storage {
+        total_bytes: (stats.f_blocks as u64).saturating_mul(block_size),
+        available_bytes: (stats.f_bavail as u64).saturating_mul(block_size),
+        used_bytes: (stats.f_blocks as u64)
+            .saturating_sub(stats.f_bfree as u64)
+            .saturating_mul(block_size),
+    })
+}
+
 #[derive(Serialize)]
 struct UiJson<'a> {
     manifest: serde_json::Value,
@@ -94,10 +122,16 @@ struct UiJson<'a> {
     cachix_cache: &'a str,
     interval_secs: u64,
     uptime_secs: u64,
+    nix_storage: Option<Storage>,
+    data_storage: Option<Storage>,
+    data_path: &'a Path,
 }
 
 pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
-    let inner = state.inner.lock().unwrap();
+    let (running, active_build, next_run_at) = {
+        let inner = state.inner.lock().unwrap();
+        (inner.running, inner.active_build.clone(), inner.next_run_at)
+    };
     let manifest = crate::job::read_manifest(&state.serve_dir)
         .and_then(|manifest| serde_json::to_value(manifest).ok())
         .unwrap_or_else(|| serde_json::json!({}));
@@ -107,9 +141,9 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
         manifest,
         serving,
         signed,
-        running: inner.running,
-        active_build: inner.active_build.clone(),
-        next_run_at: inner.next_run_at,
+        running,
+        active_build,
+        next_run_at,
         repo_url: &cfg.repo_url,
         source_url: env!("CARGO_PKG_REPOSITORY"),
         version: env!("CARGO_PKG_VERSION"),
@@ -117,6 +151,9 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
         cachix_cache: &cfg.cache_name,
         interval_secs: cfg.interval.as_secs(),
         uptime_secs: state.started.elapsed().as_secs(),
+        nix_storage: storage(Path::new("/nix/store")),
+        data_storage: storage(&cfg.serve_dir),
+        data_path: &cfg.serve_dir,
     })
     .expect("UiJson serialization cannot fail")
 }
@@ -191,6 +228,19 @@ mod tests {
         assert_eq!(value["cachix_cache"], "cache");
         assert_eq!(value["interval_secs"], 300);
         assert!(value["uptime_secs"].as_u64().is_some());
+    }
+
+    #[test]
+    fn storage_reports_capacity_and_handles_missing_paths() {
+        let dir = TempDir::new("ui-storage");
+        let info = storage(&dir).unwrap();
+        assert!(info.total_bytes > 0);
+        assert!(info.used_bytes <= info.total_bytes);
+        assert!(info.available_bytes <= info.total_bytes);
+        assert!(storage(&dir.join("missing")).is_none());
+        let value = ui_json(&UiState::new(&dir), &test_cfg(&dir));
+        assert!(value["data_storage"]["total_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(value["data_path"], dir.to_str().unwrap());
     }
 
     #[test]

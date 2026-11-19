@@ -63,6 +63,133 @@
         gap: 0.25rem;
         min-height: 8rem;
       }
+      .storage-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+        gap: 1rem;
+      }
+      .card.storage-card {
+        display: grid;
+        align-content: start;
+        gap: 0.75rem;
+        min-width: 0;
+        border-left: 3px solid var(--bg-hl);
+      }
+      .card.storage-card.warning {
+        border-left-color: var(--yellow);
+      }
+      .card.storage-card.critical {
+        border-left-color: var(--red);
+      }
+      .storage-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .storage-title {
+        display: grid;
+        gap: 0.1rem;
+        min-width: 0;
+      }
+      .storage-path {
+        color: var(--grey);
+        font-size: 0.72rem;
+        overflow-wrap: anywhere;
+        text-transform: none;
+        letter-spacing: normal;
+      }
+      .storage-pct {
+        color: var(--cyan);
+        font-size: 1.75rem;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+        white-space: nowrap;
+      }
+      .storage-pct small {
+        color: var(--grey);
+        font-size: 0.8rem;
+        margin-left: 0.15em;
+      }
+      .card.storage-card.warning .storage-pct {
+        color: var(--yellow);
+      }
+      .card.storage-card.critical .storage-pct {
+        color: var(--red);
+      }
+      /* Segmented gauge: notches are painted over the bar like a terminal meter. */
+      .storage-gauge {
+        position: relative;
+        height: 0.8rem;
+        border: 1px solid var(--border);
+        background: var(--bg);
+      }
+      .storage-gauge::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image: repeating-linear-gradient(
+          to right,
+          transparent 0 calc(5% - 2px),
+          var(--bg-alt) calc(5% - 2px) 5%
+        );
+      }
+      .storage-bar {
+        display: block;
+        width: 100%;
+        height: 100%;
+        appearance: none;
+        background: transparent;
+        color: var(--cyan);
+      }
+      .storage-bar::-webkit-progress-bar {
+        background: transparent;
+      }
+      .storage-bar::-webkit-progress-value {
+        background: currentColor;
+      }
+      .storage-bar::-moz-progress-bar {
+        background: currentColor;
+      }
+      .card.storage-card.warning .storage-bar {
+        color: var(--yellow);
+      }
+      .card.storage-card.critical .storage-bar {
+        color: var(--red);
+      }
+      /* Marks the 90% critical threshold. */
+      .storage-tick {
+        position: absolute;
+        top: -2px;
+        bottom: -2px;
+        left: 90%;
+        border-left: 1px solid var(--orange);
+        pointer-events: none;
+      }
+      .storage-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+        gap: 0.4rem 1rem;
+      }
+      .storage-stats > div {
+        display: grid;
+        gap: 0.05rem;
+        min-width: 0;
+      }
+      .storage-stat {
+        color: var(--fg);
+        font-size: 0.85rem;
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+      .storage-stat.free {
+        color: var(--green);
+      }
+      .storage-stat.total {
+        color: var(--grey);
+      }
       .countdown {
         font-variant-numeric: tabular-nums;
         letter-spacing: 0.04em;
@@ -538,6 +665,9 @@
         .status-card {
           min-height: 7rem;
         }
+        .storage-pct {
+          font-size: 1.4rem;
+        }
       }
       @media (prefers-reduced-motion: reduce) {
         *,
@@ -661,6 +791,87 @@
 
       <div class="section-heading">
         <span class="section-kicker" aria-hidden="true">//</span>
+        <h2>storage</h2>
+      </div>
+      <div class="storage-grid">
+        <div id="nix-storage-card" class="card storage-card">
+          <div class="storage-head">
+            <span class="storage-title">
+              <span class="label">nix store</span>
+              <span class="storage-path">/nix/store</span>
+            </span>
+            <span class="storage-pct" aria-hidden="true"
+              ><span id="nix-storage-pct">&mdash;</span><small>%</small></span
+            >
+          </div>
+          <div id="nix-storage-gauge" class="storage-gauge">
+            <progress
+              id="nix-storage-bar"
+              class="storage-bar"
+              max="100"
+              value="0"
+              aria-label="Nix store filesystem usage"
+            ></progress>
+            <span class="storage-tick" aria-hidden="true"></span>
+          </div>
+          <dl class="storage-stats">
+            <div>
+              <dt class="label">used</dt>
+              <dd id="nix-storage-used" class="storage-stat">&mdash;</dd>
+            </div>
+            <div>
+              <dt class="label">free</dt>
+              <dd id="nix-storage-detail" class="storage-stat free">&mdash;</dd>
+            </div>
+            <div>
+              <dt class="label">total</dt>
+              <dd id="nix-storage-total" class="storage-stat total">&mdash;</dd>
+            </div>
+          </dl>
+        </div>
+        <div id="data-storage-card" class="card storage-card">
+          <div class="storage-head">
+            <span class="storage-title">
+              <span class="label">service data</span>
+              <span id="data-storage-path" class="storage-path"></span>
+            </span>
+            <span class="storage-pct" aria-hidden="true"
+              ><span id="data-storage-pct">&mdash;</span><small>%</small></span
+            >
+          </div>
+          <div id="data-storage-gauge" class="storage-gauge">
+            <progress
+              id="data-storage-bar"
+              class="storage-bar"
+              max="100"
+              value="0"
+              aria-label="Service data filesystem usage"
+            ></progress>
+            <span class="storage-tick" aria-hidden="true"></span>
+          </div>
+          <dl class="storage-stats">
+            <div>
+              <dt class="label">used</dt>
+              <dd id="data-storage-used" class="storage-stat">&mdash;</dd>
+            </div>
+            <div>
+              <dt class="label">free</dt>
+              <dd id="data-storage-detail" class="storage-stat free">
+                &mdash;
+              </dd>
+            </div>
+            <div>
+              <dt class="label">total</dt>
+              <dd id="data-storage-total" class="storage-stat total">
+                &mdash;
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      <div class="section-heading">
+        <span class="section-kicker" aria-hidden="true">//</span>
         <h2>source</h2>
       </div>
       <div class="card source-card table-wrap">
@@ -735,6 +946,51 @@
         return `${p(h)}:${p(m)}:${p(sec)}`;
       };
 
+      const bytes = (n) => {
+        const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+        let unit = 0;
+        while (n >= 1024 && unit < units.length - 1) {
+          n /= 1024;
+          unit++;
+        }
+        return `${n.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+      };
+      function renderStorage(name, storage) {
+        const card = $(`${name}-storage-card`);
+        const gauge = $(`${name}-storage-gauge`);
+        const bar = $(`${name}-storage-bar`);
+        const pct = $(`${name}-storage-pct`);
+        const stats = [
+          $(`${name}-storage-used`),
+          $(`${name}-storage-detail`),
+          $(`${name}-storage-total`),
+        ];
+        const ok = Boolean(storage && storage.total_bytes);
+        // Match df: reserved blocks are not available to the filesystem user.
+        const usable = ok ? storage.used_bytes + storage.available_bytes : 0;
+        const percent = usable ? (100 * storage.used_bytes) / usable : 0;
+        card.classList.toggle("warning", ok && percent >= 80 && percent < 90);
+        card.classList.toggle("critical", ok && percent >= 90);
+        gauge.hidden = !ok;
+        if (!ok) {
+          pct.textContent = "\u2014";
+          stats.forEach((el) => (el.textContent = "unavailable"));
+          bar.removeAttribute("aria-valuetext");
+          bar.title = "";
+          return;
+        }
+        pct.textContent = percent.toFixed(percent >= 10 ? 0 : 1);
+        stats[0].textContent = bytes(storage.used_bytes);
+        stats[1].textContent = bytes(storage.available_bytes);
+        stats[2].textContent = bytes(storage.total_bytes);
+        bar.value = percent;
+        bar.setAttribute(
+          "aria-valuetext",
+          `${percent.toFixed(1)}% used; ${bytes(storage.available_bytes)} available`,
+        );
+        bar.title = `${percent.toFixed(1)}% used (${bytes(storage.used_bytes)} of ${bytes(storage.total_bytes)} total); filesystem capacity, not directory size`;
+      }
+
       let nextRunAt = null;
       let running = false;
       let lastRefresh = null;
@@ -766,6 +1022,9 @@
         renderSchedule(d);
         renderSource(d);
         renderSystems(m, failure);
+        $("data-storage-path").textContent = d.data_path || "\u2014";
+        renderStorage("nix", d.nix_storage);
+        renderStorage("data", d.data_storage);
       }
 
       function renderStatus(d, m, failure) {
