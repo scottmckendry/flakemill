@@ -15,6 +15,18 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          # Commands the binary shells out to. `fetch`/`apply` need curl and
+          # minisign; `serve` additionally runs the update pipeline (git, nix,
+          # cachix) and spawns nix-serve for the local binary cache. Wrapping
+          # them in PATH keeps `nix run` working on a host without them.
+          runtimeDeps = [
+            pkgs.curl
+            pkgs.minisign
+            pkgs.git
+            pkgs.nix # provides nix-store as well
+            pkgs.cachix
+            pkgs.nix-serve-ng # provides nix-serve
+          ];
           flakemill = pkgs.rustPlatform.buildRustPackage {
             pname = "flakemill";
             inherit version;
@@ -23,12 +35,7 @@
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postInstall = ''
               wrapProgram "$out/bin/flakemill" \
-                --prefix PATH : "${
-                  pkgs.lib.makeBinPath [
-                    pkgs.curl
-                    pkgs.minisign
-                  ]
-                }"
+                --prefix PATH : "${pkgs.lib.makeBinPath runtimeDeps}"
             '';
             meta = {
               description = "External update service for Nix flakes";
@@ -80,6 +87,9 @@
               cachix
               minisign
               curl
+              # so `cargo test` exercises the real local cache paths (the tests
+              # that spawn nix-serve skip themselves when it is absent)
+              nix-serve-ng
             ];
           };
         }

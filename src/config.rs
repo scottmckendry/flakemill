@@ -16,6 +16,14 @@ pub struct Cfg {
     pub cache_name: String,
     pub sign_key: Option<PathBuf>,
     pub interval: Duration,
+    /// Whether to serve the local Nix store as a binary cache at `/cache/*`.
+    /// Independent of the Cachix push target.
+    pub local_cache_enabled: bool,
+    /// Host the private `nix-serve` child binds. The port is always chosen at
+    /// startup, and flakemill is the only client of it (proxied at `/cache/*`).
+    pub cache_listen_host: String,
+    /// Persistent Nix cache signing key, separate from the minisign key.
+    pub cache_key: PathBuf,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -39,6 +47,14 @@ fn parse_systems(raw: &str) -> Result<Vec<String>> {
     Ok(systems)
 }
 
+fn parse_bool(raw: &str) -> Result<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        other => bail!("LOCAL_CACHE_ENABLED must be a boolean, got {other:?}"),
+    }
+}
+
 fn parse_interval(raw: Option<&str>) -> Result<Duration> {
     let secs = match raw {
         Some(value) => value
@@ -53,6 +69,20 @@ fn parse_interval(raw: Option<&str>) -> Result<Duration> {
     Ok(Duration::from_secs(secs))
 }
 
+/// `CACHE_LISTEN_HOST` is where the private `nix-serve` binds; the port is
+/// picked at startup, so reject anything that smuggles one in (or is not a
+/// single host). Bracketed IPv6 is accepted as `nix-serve --listen` wants it.
+fn parse_cache_host(raw: &str) -> Result<String> {
+    let host = raw.trim();
+    let ipv6 = host.starts_with('[') && host.ends_with(']') && host.len() > 2;
+    let plain = !host.is_empty() && !host.contains(['[', ']', ':', '/', ' ']);
+    if ipv6 || plain {
+        Ok(host.to_string())
+    } else {
+        bail!("CACHE_LISTEN_HOST must be a bare host or a bracketed [IPv6] address, got {raw:?}")
+    }
+}
+
 pub fn load_cfg() -> Result<Cfg> {
     Ok(Cfg {
         repo_url: env_req("REPO_URL")?,
@@ -65,6 +95,9 @@ pub fn load_cfg() -> Result<Cfg> {
             .filter(|value| !value.is_empty())
             .map(PathBuf::from),
         interval: parse_interval(std::env::var("INTERVAL_SECS").ok().as_deref())?,
+        local_cache_enabled: parse_bool(&env_or("LOCAL_CACHE_ENABLED", "true"))?,
+        cache_listen_host: parse_cache_host(&env_or("CACHE_LISTEN_HOST", "127.0.0.1"))?,
+        cache_key: PathBuf::from(env_or("CACHE_KEY", "/var/lib/flakemill/keys/cache")),
     })
 }
 
@@ -109,5 +142,38 @@ mod tests {
 
         let garbage = parse_interval(Some("soon")).unwrap_err().to_string();
         assert!(garbage.contains("positive integer"), "{garbage}");
+    }
+
+    #[test]
+    fn local_cache_enabled_accepts_common_booleans() {
+        for value in ["1", "true", "TRUE", "yes", "on", " on "] {
+            assert!(parse_bool(value).unwrap(), "{value}");
+        }
+        for value in ["0", "false", "False", "no", "off", " off "] {
+            assert!(!parse_bool(value).unwrap(), "{value}");
+        }
+        let err = parse_bool("maybe").unwrap_err().to_string();
+        assert!(err.contains("LOCAL_CACHE_ENABLED"), "{err}");
+    }
+
+    #[test]
+    fn cache_listen_host_is_a_bare_host() {
+        for valid in ["127.0.0.1", "localhost", "mill.example", "[::1]"] {
+            assert!(!parse_cache_host(valid).unwrap().is_empty(), "{valid}");
+        }
+        assert_eq!(parse_cache_host(" 127.0.0.1 ").unwrap(), "127.0.0.1");
+        assert_eq!(parse_cache_host("[::1]").unwrap(), "[::1]");
+        // Ports belong to the kernel's choice, not to config.
+        for invalid in [
+            "",
+            "127.0.0.1:5000",
+            "::1",
+            "[::1]:5000",
+            "a b",
+            "host/path",
+        ] {
+            let err = parse_cache_host(invalid).unwrap_err().to_string();
+            assert!(err.contains("CACHE_LISTEN_HOST"), "{err}");
+        }
     }
 }
