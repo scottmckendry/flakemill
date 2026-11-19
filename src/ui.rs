@@ -89,6 +89,10 @@ struct Storage {
     used_bytes: u64,
 }
 
+/// `statvfs` field widths are platform dependent (they are narrower than u64 on
+/// 32-bit targets), so the casts stay even though clippy flags them as
+/// redundant on this host target.
+#[allow(clippy::unnecessary_cast)]
 fn storage(path: &Path) -> Option<Storage> {
     let path = CString::new(path.as_os_str().as_bytes()).ok()?;
     let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();

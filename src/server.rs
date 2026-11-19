@@ -128,7 +128,7 @@ pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
             file_route("manifest.json", "application/json"),
         )
         .route(
-            "/log-tail/:host",
+            "/log-tail/{host}",
             axum::routing::get({
                 let dir = serve_dir.clone();
                 move |path: axum::extract::Path<String>| {
@@ -143,7 +143,7 @@ pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
             }),
         )
         .route(
-            "/logs/:host",
+            "/logs/{host}",
             axum::routing::get({
                 let dir = serve_dir.clone();
                 move |path: axum::extract::Path<String>| {
