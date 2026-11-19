@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/scottmckendry/flakemill/compare/v0.4.2...v0.5.0) (2026-11-19)
+
+
+### Features
+
+* **dashboard:** add storage section for pvcs ([41df299](https://github.com/scottmckendry/flakemill/commit/41df2998f17b2574831f77e9ac290ffdb77bf3c2))
+* local cache serving with nix-serve-ng ([78a581c](https://github.com/scottmckendry/flakemill/commit/78a581cedb6119bd1d599718e39420436511c607))
+
+
+### Bug Fixes
+
+* **dashboard:** snow drawing over cards ([00fa53a](https://github.com/scottmckendry/flakemill/commit/00fa53a7b53c8536a30e07e86c03145db9ff592c))
+
 ## [0.4.2](https://github.com/scottmckendry/flakemill/compare/v0.4.1...v0.4.2) (2026-11-18)
 
 
