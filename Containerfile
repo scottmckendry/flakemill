@@ -32,6 +32,9 @@ ENV PATH=/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:${PATH}
 # cachix (no GH releases; install via its official nix expr)
 RUN nix-env -iA cachix -f https://cachix.org/api/v1/install
 
+# nix-serve-ng: serves /nix/store as a binary cache (flakemill proxies it at /cache)
+RUN nix profile install nixpkgs#nix-serve-ng
+
 COPY --from=build /build/target/release/flakemill /usr/local/bin/flakemill
 
 # configure nix to run in the container

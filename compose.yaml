@@ -36,6 +36,9 @@ services:
       CACHIX_CACHE: scottmckendry
       SIGN_KEY: /secrets/sign.key
       INTERVAL_SECS: "300"
+      # base URL hosts reach this rig at, so the dashboard and logs can print a
+      # substituter URL to copy; set per tunnel when not using localhost:8080
+      PUBLIC_URL: http://localhost:8080
     env_file:
       - ./secrets/.env
     privileged: true

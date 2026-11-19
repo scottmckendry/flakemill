@@ -7,6 +7,7 @@
 use std::{path::PathBuf, process::ExitCode, time::Duration};
 
 mod atomic;
+mod cache;
 mod client;
 mod clock;
 mod cmd;
@@ -192,10 +193,48 @@ fn serve() -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let cfg = load_cfg()?;
         std::fs::create_dir_all(&cfg.serve_dir)?;
+        let ui = ui::UiState::new(&cfg.serve_dir);
+
+        // Start the local binary cache (nix-serve on loopback, proxied at
+        // /cache/*) unless it is switched off in config. A failure here
+        // degrades to lock-only serving; hosts can still fall back to
+        // cache.nixos.org and Cachix.
+        let cache = if cfg.local_cache_enabled {
+            match cache::start(&cfg, &cfg.cache_listen_host) {
+                Ok(started) => started,
+                Err(e) => {
+                    log::warn!("local binary cache disabled: {e:#}");
+                    None
+                }
+            }
+        } else {
+            log::info!("local binary cache disabled by LOCAL_CACHE_ENABLED");
+            None
+        };
+        let (endpoint, _cache_service) = match cache {
+            Some((service, endpoint)) => (Some(endpoint), Some(service)),
+            None => (None, None),
+        };
+        ui.set_local_cache_active(endpoint.is_some());
+        let cache_info = cache::cache_info(&cfg, endpoint.is_some());
+        ui.set_cache_info(cache_info.clone());
+        match (&endpoint, cache_info) {
+            (Some(_), Some(info)) => log::info!(
+                "binary cache: {}; hosts trust it with\n  extra-substituters = {}\n  extra-trusted-public-keys = {}",
+                info.url,
+                info.substituter,
+                info.public_key
+            ),
+            (Some(_), None) => log::info!(
+                "binary cache serving at {} (set PUBLIC_URL to publish a copyable substituter URL)",
+                cache::CACHE_PREFIX
+            ),
+            _ => {}
+        }
+        let cache_upstream = endpoint.as_ref().map(cache::Endpoint::upstream);
 
         let addr = std::env::var("LISTEN").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
-        let ui = ui::UiState::new(&cfg.serve_dir);
-        let app = server::build_router(&cfg, ui.clone());
+        let app = server::build_router(&cfg, ui.clone(), cache_upstream.as_deref());
 
         tokio::spawn({
             let cfg = cfg.clone();
@@ -241,7 +280,41 @@ fn serve() -> Result<()> {
 
         log::info!("listening on {addr}");
         let listener = tokio::net::TcpListener::bind(&addr).await?;
-        axum::serve(listener, app).await?;
+        let serving = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
+        // Graceful shutdown waits for in-flight requests to finish, and a host
+        // pulling a large NAR can hold one open far longer than a container
+        // stop allows. Give stragglers a moment, then cancel the server and
+        // return, which drops `_cache_service` so nix-serve is reaped here
+        // instead of by a SIGKILL that would leave it orphaned.
+        if tokio::time::timeout(SHUTDOWN_GRACE, serving).await.is_err() {
+            log::warn!(
+                "requests still in flight after {SHUTDOWN_GRACE:?}; closing connections"
+            );
+        }
         Ok(())
     })
+}
+
+/// How long `serve` lets in-flight requests (NAR downloads included) drain
+/// after a shutdown signal before closing the listener.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+
+/// Resolve on SIGINT/SIGTERM so `serve` exits its normal path and stops its
+/// nix-serve child. A hard kill would skip destructors; `PR_SET_PDEATHSIG` on
+/// the child covers that case.
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut term = match signal(SignalKind::terminate()) {
+        Ok(term) => term,
+        Err(e) => {
+            log::warn!("cannot listen for SIGTERM; ctrl-c only: {e}");
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        }
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = term.recv() => {}
+    }
+    log::info!("shutdown signal received; stopping");
 }

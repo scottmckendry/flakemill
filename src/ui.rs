@@ -10,12 +10,16 @@ use std::{
 
 use serde::Serialize;
 
+use crate::cache::CacheInfo;
+
 /// Runtime info the scheduler loop feeds back into the dashboard.
 #[derive(Default)]
 pub struct Inner {
     pub running: bool,
     pub next_run_at: Option<u64>, // unix epoch secs
     pub active_build: Option<ActiveBuild>,
+    pub local_cache_active: bool,
+    pub cache_info: Option<CacheInfo>,
 }
 
 #[derive(Clone, Serialize)]
@@ -79,6 +83,28 @@ impl UiState {
     pub fn set_next_run_at(&self, at: u64) {
         self.inner.lock().unwrap().next_run_at = Some(at);
     }
+
+    /// Record whether the local binary cache (nix-serve) is actually running.
+    /// The router and the dashboard use this to avoid advertising a key or a
+    /// substituter URL when cache serving is disabled in config or nix-serve
+    /// is unavailable.
+    pub fn set_local_cache_active(&self, active: bool) {
+        self.inner.lock().unwrap().local_cache_active = active;
+    }
+
+    pub fn local_cache_active(&self) -> bool {
+        self.inner.lock().unwrap().local_cache_active
+    }
+
+    /// How to reach the local binary cache, or `None` when it is off or no
+    /// `PUBLIC_URL` is configured to build a client-reachable URL from.
+    pub fn set_cache_info(&self, info: Option<CacheInfo>) {
+        self.inner.lock().unwrap().cache_info = info;
+    }
+
+    pub fn cache_info(&self) -> Option<CacheInfo> {
+        self.inner.lock().unwrap().cache_info.clone()
+    }
 }
 
 /// Capacity of the filesystem containing a path, not the size of the directory.
@@ -124,6 +150,9 @@ struct UiJson<'a> {
     version: &'static str,
     branch: &'a str,
     cachix_cache: &'a str,
+    /// How to use the local binary cache: substituter URL and public key.
+    /// Absent when the cache is off or `PUBLIC_URL` is unset.
+    cache: Option<CacheInfo>,
     interval_secs: u64,
     uptime_secs: u64,
     nix_storage: Option<Storage>,
@@ -141,6 +170,7 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
         .unwrap_or_else(|| serde_json::json!({}));
     let serving = state.serve_dir.join("flake.lock").exists();
     let signed = state.serve_dir.join("flake.lock.minisig").exists();
+    let cache = state.cache_info();
     serde_json::to_value(UiJson {
         manifest,
         serving,
@@ -153,6 +183,7 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
         version: env!("CARGO_PKG_VERSION"),
         branch: &cfg.branch,
         cachix_cache: &cfg.cache_name,
+        cache,
         interval_secs: cfg.interval.as_secs(),
         uptime_secs: state.started.elapsed().as_secs(),
         nix_storage: storage(Path::new("/nix/store")),
@@ -162,20 +193,39 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
     .expect("UiJson serialization cannot fail")
 }
 
-/// Embedded dashboard HTML for release builds.
+/// Embedded HTML for release builds.
 const EMBEDDED_INDEX_HTML: &str = include_str!("ui/index.html");
+const EMBEDDED_CACHE_INFO_HTML: &str = include_str!("ui/cache-info.html");
 
-/// In debug builds the dashboard is served from disk so HTML/CSS/JS edits
-/// show up on browser refresh without recompiling. Release builds embed it.
-pub fn index_html() -> String {
+/// Serve a static page. In debug builds it is read from disk so HTML/CSS/JS
+/// edits show up on a browser refresh without recompiling; release builds use
+/// the copy embedded at compile time.
+fn static_html(path: &'static str, embedded: &'static str) -> String {
     #[cfg(debug_assertions)]
     {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/index.html");
         if let Ok(html) = std::fs::read_to_string(path) {
             return html;
         }
+        log::warn!("{path} not found; serving the embedded copy");
     }
-    EMBEDDED_INDEX_HTML.to_string()
+    let _ = path;
+    embedded.to_string()
+}
+
+/// The dashboard at `/`.
+pub fn index_html() -> String {
+    static_html(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/index.html"),
+        EMBEDDED_INDEX_HTML,
+    )
+}
+
+/// Standalone binary cache setup instructions, served at `/cache-info`.
+pub fn cache_info_html() -> String {
+    static_html(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/src/ui/cache-info.html"),
+        EMBEDDED_CACHE_INFO_HTML,
+    )
 }
 
 #[cfg(test)]
@@ -230,8 +280,42 @@ mod tests {
         assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(value["branch"], "main");
         assert_eq!(value["cachix_cache"], "cache");
+        // The cache row is opt-in: nothing was handed to the state here.
+        assert_eq!(value["cache"], serde_json::Value::Null);
         assert_eq!(value["interval_secs"], 300);
         assert!(value["uptime_secs"].as_u64().is_some());
+    }
+
+    #[test]
+    fn ui_json_advertises_the_cache_only_when_told_to() {
+        let dir = TempDir::new("ui-json-cache");
+        std::fs::write(dir.join("cache.pub"), b"flakemill-cache:xyz\n").unwrap();
+        let cfg = test_cfg(&dir);
+        let state = UiState::new(&dir);
+
+        // Disabled: no cache row for hosts to copy.
+        assert!(ui_json(&state, &cfg)["cache"].is_null());
+
+        // Serving: `serve` hands over the info built from PUBLIC_URL and the
+        // published key, and it appears verbatim.
+        state.set_local_cache_active(true);
+        state.set_cache_info(crate::cache::cache_info(&cfg, state.local_cache_active()));
+        let cache = ui_json(&state, &cfg)["cache"].clone();
+        assert_eq!(cache["url"], "https://mill.example/cache");
+        assert_eq!(
+            cache["substituter"],
+            "https://mill.example/cache?priority=10"
+        );
+        assert_eq!(cache["public_key"], "flakemill-cache:xyz");
+
+        // No PUBLIC_URL means no client-reachable URL to advertise.
+        let no_base = crate::config::Cfg {
+            public_url: String::new(),
+            ..cfg.clone()
+        };
+        assert!(crate::cache::cache_info(&no_base, true).is_none());
+        state.set_cache_info(None);
+        assert!(ui_json(&state, &no_base)["cache"].is_null());
     }
 
     #[test]

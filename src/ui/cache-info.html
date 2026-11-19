@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>flakemill — using the binary cache</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext x='32' y='50' text-anchor='middle' font-size='56' fill='%237ed8e8'%3E%E2%9D%84%3C/text%3E%3C/svg%3E"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --card: #161b22;
+        --line: #30363d;
+        --text: #c9d1d9;
+        --muted: #8b949e;
+        --cyan: #7ed8e8;
+      }
+      body {
+        margin: 0 auto;
+        padding: 2rem 1rem 4rem;
+        max-width: 46rem;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.6 ui-sans-serif, system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 0.25rem;
+        color: var(--cyan);
+      }
+      p.lede {
+        margin: 0 0 2rem;
+        color: var(--muted);
+      }
+      h2 {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        margin: 2rem 0 0.5rem;
+      }
+      pre {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        overflow-x: auto;
+        font-size: 0.8rem;
+        line-height: 1.5;
+      }
+      code {
+        font-family: ui-monospace, monospace;
+      }
+      a {
+        color: var(--cyan);
+      }
+      ul {
+        padding-left: 1.25rem;
+      }
+      .note {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Using this binary cache</h1>
+    <p class="lede">
+      flakemill serves its own Nix store as a signed binary cache, so hosts can
+      download build results straight from the mill instead of waiting for them
+      to reach Cachix.
+    </p>
+
+    <h2>1. Get the two values</h2>
+    <p>
+      The substituter URL is simply this instance's address with
+      <code>/cache</code> appended; the key is published next to it:
+    </p>
+    <pre><code>curl -fsS https://&lt;mill-url&gt;/cache.pub   # signing key to trust</code></pre>
+    <p class="note">
+      The dashboard's "cache" rows copy both, and the "nix.conf" button copies
+      the whole block below in one go.
+    </p>
+
+    <h2>2. Configure each host</h2>
+    <p>Drop-in for <code>/etc/nix/nix.conf</code>:</p>
+    <pre><code>extra-substituters = https://&lt;mill-url&gt;/cache?priority=10
+extra-trusted-public-keys = &lt;contents of /cache.pub&gt;</code></pre>
+    <p>Or in NixOS configuration:</p>
+    <pre><code>nix.settings.extra-substituters = [ "https://&lt;mill-url&gt;/cache?priority=10" ];
+nix.settings.extra-trusted-public-keys = [ "flakemill-cache:…" ];</code></pre>
+    <p class="note">
+      On NixOS the user must be in <code>nix.settings.trusted-users</code>
+      (or <code>nixUsers</code>) for extra substituters to apply.
+    </p>
+
+    <h2>3. Why the priority</h2>
+    <p>
+      Nix consults substituters in ascending order of the priority each cache
+      advertises: <code>cache.nixos.org</code> publishes 40 and Cachix 41, and
+      this cache advertises 30. Writing <code>?priority=10</code> in the URL
+      pins the mill in front of both, which is what you want for freshly
+      published systems; drop it if you would rather the public caches answer
+      first.
+    </p>
+    <p class="note">
+      Priority only says where to <em>look</em> first. Paths are still
+      signature-checked, so a host that does not trust the key above will
+      refuse everything the mill offers, and a host that does will never accept
+      a path signed by someone else.
+    </p>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>
+        The cache answers for paths already in the mill's store. It does not
+        forward requests to Cachix or <code>cache.nixos.org</code>; hosts keep
+        those as upstreams.
+      </li>
+      <li>
+        It is a plain HTTP endpoint with no authentication: anyone who can
+        reach it can download anything in the store. Terminate TLS in front of
+        flakemill (or restrict the network) and set <code>PUBLIC_URL</code> so
+        the advertised URL matches what hosts actually use.
+      </li>
+      <li>
+        Garbage collection still removes unpublished paths, so the cache is a
+        convenience, not an archive. Cachix remains the durable push target.
+      </li>
+    </ul>
+
+    <p><a href="/">← back to the dashboard</a></p>
+  </body>
+</html>
