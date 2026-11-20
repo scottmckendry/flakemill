@@ -15,15 +15,10 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          # Commands the binary shells out to. `fetch`/`apply` need curl and
-          # minisign; `serve` additionally runs the update pipeline (git, nix,
-          # cachix). Wrapping them in PATH keeps `nix run` working on a host
-          # without them.
           runtimeDeps = [
             pkgs.curl
             pkgs.minisign
             pkgs.git
-            pkgs.nix # provides nix-store as well
             pkgs.cachix
           ];
           flakemill = pkgs.rustPlatform.buildRustPackage {
@@ -31,8 +26,17 @@
             inherit version;
             src = self;
             cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = [ pkgs.makeWrapper ];
+            nativeBuildInputs = [
+              pkgs.makeWrapper
+              pkgs.installShellFiles
+            ];
             postInstall = ''
+              installShellCompletion --cmd flakemill \
+                --bash <("$out/bin/flakemill" completions bash) \
+                --fish <("$out/bin/flakemill" completions fish) \
+                --zsh <("$out/bin/flakemill" completions zsh)
+              mkdir -p "$out/share/nushell/vendor/autoload"
+              "$out/bin/flakemill" completions nushell > "$out/share/nushell/vendor/autoload/flakemill.nu"
               wrapProgram "$out/bin/flakemill" \
                 --prefix PATH : "${pkgs.lib.makeBinPath runtimeDeps}"
             '';

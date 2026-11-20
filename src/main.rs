@@ -23,7 +23,8 @@ mod testing;
 mod ui;
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueHint};
+use clap_complete::Shell;
 
 use client::{Check, Client};
 use clock::now_secs;
@@ -42,7 +43,7 @@ struct Cli {
     url: Option<String>,
 
     /// Minisign public key file used to verify published locks.
-    #[arg(long, env = "FLAKEMILL_PUBLIC_KEY", global = true)]
+    #[arg(long, env = "FLAKEMILL_PUBLIC_KEY", global = true, value_hint = ValueHint::FilePath)]
     public_key: Option<PathBuf>,
 
     /// Local flake.lock to compare against or update.
@@ -50,7 +51,8 @@ struct Cli {
         long,
         env = "FLAKEMILL_LOCK",
         default_value = "flake.lock",
-        global = true
+        global = true,
+        value_hint = ValueHint::FilePath
     )]
     lock: PathBuf,
 
@@ -90,8 +92,16 @@ enum Command {
     /// Fetch and verify a lock, writing it to stdout or a file.
     Fetch {
         /// Write the verified lock here instead of stdout.
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::FilePath)]
         output: Option<PathBuf>,
+    },
+
+    /// Generate a shell completion script on stdout.
+    #[command(override_usage = "flakemill completions <SHELL>")]
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_parser = ["bash", "elvish", "fish", "powershell", "zsh", "nushell", "nu"])]
+        shell: String,
     },
 }
 
@@ -110,6 +120,22 @@ fn run() -> Result<ExitCode> {
     match &cli.command {
         Command::Serve => {
             serve()?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Completions { shell } => {
+            let mut command = Cli::command();
+            let mut stdout = std::io::stdout();
+            if matches!(shell.as_str(), "nushell" | "nu") {
+                clap_complete::generate(
+                    clap_complete_nushell::Nushell,
+                    &mut command,
+                    "flakemill",
+                    &mut stdout,
+                );
+            } else {
+                let shell = shell.parse::<Shell>().map_err(anyhow::Error::msg)?;
+                clap_complete::generate(shell, &mut command, "flakemill", &mut stdout);
+            }
             Ok(ExitCode::SUCCESS)
         }
         command => run_client(&cli, command),
@@ -169,7 +195,9 @@ fn run_client(cli: &Cli, command: &Command) -> Result<ExitCode> {
                 .context("fetching published lock")?;
             Ok(ExitCode::SUCCESS)
         }
-        Command::Serve => unreachable!("serve is handled before client dispatch"),
+        Command::Serve | Command::Completions { .. } => {
+            unreachable!("non-client commands are handled before client dispatch")
+        }
     }
 }
 
