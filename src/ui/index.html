@@ -574,25 +574,6 @@
       .source-card a {
         overflow-wrap: anywhere;
       }
-      .source-card .copy-value {
-        display: block;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: var(--cyan);
-        font: inherit;
-        text-align: left;
-        cursor: pointer;
-      }
-      .source-card .copy-value:hover,
-      .source-card .copy-value:focus-visible {
-        color: var(--blue);
-        outline: none;
-      }
-      .source-card .copy-value.copied {
-        color: var(--green);
-      }
       footer {
         display: flex;
         flex-wrap: wrap;
@@ -1097,18 +1078,6 @@
           },
           { k: "branch", v: esc(d.branch || "\u2014") },
           { k: "cachix", v: esc(d.cachix_cache || "\u2014") },
-          ...(d.cache
-            ? [
-                {
-                  k: "cache key",
-                  v: `<code class="copy-value" role="button" tabindex="0" data-copy="${esc(
-                    d.cache.public_key,
-                  )}" aria-label="Copy binary cache public key" title="${esc(
-                    d.cache.public_key,
-                  )}\nclick to copy">${esc(d.cache.public_key)}</code>`,
-                },
-              ]
-            : []),
           {
             k: "interval",
             v: interval ? `${Math.round(interval / 60)} min` : "\u2014",
@@ -1213,50 +1182,6 @@
           countdown.textContent = "—";
           countdown.style.color = "var(--grey)";
         }
-      }
-
-      async function copyValue(el) {
-        const text = el.dataset.copy;
-        if (!text) return;
-        let ok = false;
-        try {
-          await navigator.clipboard.writeText(text);
-          ok = true;
-        } catch {
-          // Clipboard API needs a secure context; fall back for plain http.
-          const area = document.createElement("textarea");
-          area.value = text;
-          area.setAttribute("readonly", "");
-          area.style.position = "fixed";
-          area.style.opacity = "0";
-          document.body.appendChild(area);
-          area.select();
-          try {
-            ok = document.execCommand("copy");
-          } finally {
-            area.remove();
-          }
-        }
-        el.classList.toggle("copied", ok);
-        const label = ok ? "copied ✓" : "copy failed";
-        el.textContent = label;
-        clearTimeout(el.copyTimer);
-        el.copyTimer = setTimeout(() => {
-          el.classList.remove("copied");
-          el.textContent = text;
-        }, 1200);
-      }
-
-      // Re-rendered every refresh, so delegate from the table body.
-      for (const type of ["click", "keydown"]) {
-        $("source").addEventListener(type, (e) => {
-          if (type === "keydown" && e.key !== "Enter" && e.key !== " ")
-            return;
-          const el = e.target.closest("[data-copy]");
-          if (!el) return;
-          e.preventDefault();
-          copyValue(el);
-        });
       }
 
       async function refresh() {

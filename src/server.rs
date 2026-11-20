@@ -11,7 +11,6 @@ use axum::{
 };
 
 use crate::{
-    cache,
     config::Cfg,
     ui::{index_html, ui_json, UiState},
 };
@@ -72,19 +71,7 @@ fn valid_log_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-/// Build the HTTP router.
-///
-/// `cache_upstream` is the loopback URL of the running `nix-serve` child.
-/// `/cache/*` and `/cache.pub` are mounted only when the cache is enabled in
-/// config *and* actually serving, so the dashboard can never advertise a key
-/// with no binary cache behind it.
-pub fn build_router(cfg: &Cfg, ui: UiState, cache_upstream: Option<&str>) -> axum::Router {
-    let cache_upstream = match cfg.local_cache_enabled && ui.local_cache_active() {
-        true => cache_upstream,
-        false => None,
-    };
-    let serve_local_cache = cache_upstream.is_some();
-    let cache_router = cache_upstream.map(cache::proxy_router);
+pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
     let cfg = std::sync::Arc::new(cfg.clone());
     let serve_dir = std::sync::Arc::new(cfg.serve_dir.clone());
     let file_route = |path: &'static str, content_type: &'static str| {
@@ -94,7 +81,7 @@ pub fn build_router(cfg: &Cfg, ui: UiState, cache_upstream: Option<&str>) -> axu
             async move { serve_file(&dir, path, content_type) }
         })
     };
-    let mut router = axum::Router::new()
+    axum::Router::new()
         .route(
             "/",
             axum::routing::get(|| async {
@@ -170,17 +157,8 @@ pub fn build_router(cfg: &Cfg, ui: UiState, cache_upstream: Option<&str>) -> axu
                     }
                 }
             }),
-        );
-    if serve_local_cache {
-        router = router.route(
-            "/cache.pub",
-            file_route("cache.pub", "text/plain; charset=utf-8"),
-        );
-    }
-    if let Some(cache_router) = cache_router {
-        router = router.merge(cache_router);
-    }
-    router.layer(tower_http::trace::TraceLayer::new_for_http())
+        )
+        .layer(tower_http::trace::TraceLayer::new_for_http())
 }
 
 #[cfg(test)]
@@ -234,7 +212,7 @@ mod tests {
         std::fs::write(dir.join("manifest.json"), br#"{"status":"ok"}"#).unwrap();
         std::fs::write(dir.join("flake.lock.minisig"), b"signature\n").unwrap();
 
-        let app = build_router(&test_cfg(&dir), UiState::new(&dir), None);
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
 
         let response = app.clone().oneshot(request("/flake.lock")).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -267,7 +245,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("logs")).unwrap();
         std::fs::write(dir.join("logs/eris.log"), b"build output\n").unwrap();
 
-        let app = build_router(&test_cfg(&dir), UiState::new(&dir), None);
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
 
         let response = app
             .clone()
@@ -292,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn serves_live_log_page() {
         let dir = TempDir::new("server-live-log-page");
-        let app = build_router(&test_cfg(&dir), UiState::new(&dir), None);
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
         let response = app.oneshot(request("/live-log")).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -309,7 +287,7 @@ mod tests {
         let mut bytes = vec![b'x'; TAIL_BYTES as usize + 100];
         bytes.extend_from_slice(b"end\n");
         std::fs::write(dir.join("logs/eris.log"), bytes).unwrap();
-        let app = build_router(&test_cfg(&dir), UiState::new(&dir), None);
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
         let response = app
             .clone()
             .oneshot(request("/log-tail/eris.log"))
@@ -330,66 +308,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    /// A stand-in upstream address: these tests exercise routing, not nix-serve.
-    const UPSTREAM: &str = "http://127.0.0.1:5555";
-
-    #[tokio::test]
-    async fn serves_cache_public_key() {
-        let dir = TempDir::new("server-cache-pub");
-        std::fs::write(dir.join("cache.pub"), b"flakemill-cache:abc\n").unwrap();
-        let state = UiState::new(&dir);
-        state.set_local_cache_active(true);
-        let app = build_router(&test_cfg(&dir), state, Some(UPSTREAM));
-
-        let response = app.oneshot(request("/cache.pub")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/plain; charset=utf-8"
-        );
-        assert_eq!(body_string(response).await, "flakemill-cache:abc\n");
-    }
-
-    #[tokio::test]
-    async fn cache_routes_report_bad_gateway_without_upstream() {
-        // Grab a port nothing listens on; the proxy must fail cleanly instead
-        // of hanging or panicking.
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
-        };
-        let dir = TempDir::new("server-cache-down");
-        let cfg = test_cfg(&dir);
-        let state = UiState::new(&dir);
-        state.set_local_cache_active(true);
-        let app = build_router(&cfg, state, Some(&format!("http://127.0.0.1:{port}")));
-
-        let response = app.oneshot(request("/cache/nix-cache-info")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    }
-
-    #[tokio::test]
-    async fn cache_routes_are_absent_when_local_cache_is_disabled() {
-        let dir = TempDir::new("server-cache-disabled");
-        std::fs::write(dir.join("cache.pub"), b"flakemill-cache:abc\n").unwrap();
-        let cfg = crate::config::Cfg {
-            local_cache_enabled: false,
-            ..test_cfg(&dir)
-        };
-        let state = UiState::new(&dir);
-        state.set_local_cache_active(true);
-        let app = build_router(&cfg, state, Some(UPSTREAM));
-
-        for uri in ["/cache.pub", "/cache/nix-cache-info"] {
-            let response = app.clone().oneshot(request(uri)).await.unwrap();
-            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
-        }
-    }
-
     #[tokio::test]
     async fn missing_files_and_health_endpoint() {
         let dir = TempDir::new("server-missing");
-        let app = build_router(&test_cfg(&dir), UiState::new(&dir), None);
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
 
         let response = app.clone().oneshot(request("/flake.lock")).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);

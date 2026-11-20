@@ -17,7 +17,6 @@ An external update service for [Nix flakes](https://nixos.wiki/wiki/Flakes): ref
 - **Build before publishing.** A new lock is served only after all configured systems build and their results are pushed to [Cachix](https://cachix.org).
 - **Verify before applying.** Hosts can check the lock's minisign signature against a pinned public key.
 - **Keep control of your repo.** flakemill never pushes changes back; it only mills and serves.
-- **Substitute from the mill.** Serve the local Nix store as a signed binary cache at `/cache/*`, so hosts can pull build results directly from flakemill.
 
 ## how it works
 
@@ -31,8 +30,6 @@ On every tick (or manual trigger), flakemill runs:
 
 > A failed build never publishes a new lock. Hosts continue to use the last successfully published result.
 
-Separately, flakemill continuously serves the local Nix store as a signed binary cache at `/cache/*`, so hosts can substitute directly from the mill. Set `LOCAL_CACHE_ENABLED=false` to disable it.
-
 ## endpoints
 
 | Path                      | Contents                                     |
@@ -43,8 +40,6 @@ Separately, flakemill continuously serves the local Nix store as a signed binary
 | `GET /flake.lock.minisig` | minisign signature over the lock             |
 | `GET /manifest.json`      | status of the last run (rev, systems, error) |
 | `GET /logs/{host}.log`    | latest captured build log for a system       |
-| `GET /cache/*`            | local binary cache (narinfo, NAR)            |
-| `GET /cache.pub`          | public key for the local binary cache        |
 | `GET /healthz`            | liveness                                     |
 
 ## usage
@@ -96,7 +91,7 @@ nix run github:scottmckendry/flakemill -- check --url https://flakemill.example 
 nix build github:scottmckendry/flakemill
 ```
 
-`packages.<system>.flakemill` is the shared entry point. It wraps every command the binary shells out to (`git`, `nix`, `cachix`, `minisign`, `curl`, and `nix-serve` for the local cache) into its `PATH`, so `nix run` needs nothing else installed.
+`packages.<system>.flakemill` is the shared entry point. It wraps every command the binary shells out to (`git`, `nix`, `cachix`, `minisign`, `curl`) into its `PATH`, so `nix run` needs nothing else installed.
 
 ## configuration
 
@@ -114,9 +109,6 @@ Configure the server with environment variables. Set `SIGN_KEY` to publish signe
 | `SERVE_DIR`           | `/var/lib/flakemill/serve`      | Published lock + signature                                                     |
 | `INTERVAL_SECS`       | `21600`                         | Seconds between update runs (must be greater than zero)                        |
 | `LISTEN`              | `0.0.0.0:8080`                  | HTTP listen address                                                            |
-| `LOCAL_CACHE_ENABLED` | `true`                          | Serve the local Nix store as a binary cache at `/cache/*`                      |
-| `CACHE_KEY`           | `/var/lib/flakemill/keys/cache` | Persistent signing key for local cache narinfos                                |
-| `CACHE_LISTEN_HOST`   | `127.0.0.1`                     | Host the private `nix-serve` child binds; its port is chosen at startup        |
 | `NIX_CONFIG`          |                                 | Extra nix.conf lines, e.g. `access-tokens` for private inputs (`secrets/.env`) |
 
 > [!NOTE]
@@ -134,19 +126,3 @@ extra-substituters = https://<cache>.cachix.org
 extra-trusted-public-keys = <cache>.cachix.org-1:...
 '
 ```
-
-### local binary cache
-
-Flakemill runs [`nix-serve-ng`](https://github.com/aristanetworks/nix-serve-ng) on loopback and reverse-proxies `/cache/*` to it, so hosts can substitute directly from the mill without a second on-disk copy of the store. The child binds a port chosen at startup (nothing to configure or collide with), is stopped when flakemill shuts down, and is quiet by default so cache traffic does not drown the update logs. The cache serves local store paths only; it is not a transparent proxy for upstream caches.
-
-> [!WARNING]
-> `/cache/*` is unauthenticated and exposes every path in the mill's store — including anything derived from a private config repo. Put it behind TLS and a network boundary (or set `LOCAL_CACHE_ENABLED=false`) unless you intend the store to be readable by whoever can reach the port.
-
-Configure hosts in NixOS with this instance's address plus `/cache`, and the key from `/cache.pub` (the dashboard's "cache key" row has a copy button):
-
-```nix
-nix.settings.extra-substituters = [ "https://<mill-url>/cache?priority=10" ];
-nix.settings.extra-trusted-public-keys = [ "flakemill-cache:…" ];
-```
-
-The `?priority=10` query pins the mill ahead of `cache.nixos.org` (40) and Cachix (41): nix consults substituters in ascending priority order. Drop it if you would rather the public caches answer first.

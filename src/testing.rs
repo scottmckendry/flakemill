@@ -20,9 +20,6 @@ pub fn test_cfg(serve_dir: &Path) -> Cfg {
         cache_name: "cache".into(),
         sign_key: None,
         interval: Duration::from_secs(300),
-        local_cache_enabled: true,
-        cache_listen_host: "127.0.0.1".into(),
-        cache_key: serve_dir.join("keys/cache"),
     }
 }
 

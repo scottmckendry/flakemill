@@ -12,7 +12,6 @@ use std::{
 };
 
 mod atomic;
-mod cache;
 mod client;
 mod clock;
 mod cmd;
@@ -200,40 +199,8 @@ fn serve() -> Result<()> {
         std::fs::create_dir_all(&cfg.serve_dir)?;
         let ui = ui::UiState::new(&cfg.serve_dir);
 
-        // Start the local binary cache (nix-serve on loopback, proxied at
-        // /cache/*) unless it is switched off in config. A failure here
-        // degrades to lock-only serving; hosts can still fall back to
-        // cache.nixos.org and Cachix.
-        let cache = if cfg.local_cache_enabled {
-            match cache::start(&cfg, &cfg.cache_listen_host) {
-                Ok(started) => started,
-                Err(e) => {
-                    log::warn!("local binary cache disabled: {e:#}");
-                    None
-                }
-            }
-        } else {
-            log::info!("local binary cache disabled by LOCAL_CACHE_ENABLED");
-            None
-        };
-        let (endpoint, _cache_service) = match cache {
-            Some((service, endpoint)) => (Some(endpoint), Some(service)),
-            None => (None, None),
-        };
-        ui.set_local_cache_active(endpoint.is_some());
-        let cache_info = cache::cache_info(&cfg, endpoint.is_some());
-        ui.set_cache_info(cache_info.clone());
-        if let (Some(_), Some(info)) = (&endpoint, cache_info) {
-            log::info!(
-                "binary cache serving at {}; hosts trust it with\n  extra-trusted-public-keys = {}",
-                cache::CACHE_PREFIX,
-                info.public_key
-            );
-        }
-        let cache_upstream = endpoint.as_ref().map(cache::Endpoint::upstream);
-
         let addr = std::env::var("LISTEN").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
-        let app = server::build_router(&cfg, ui.clone(), cache_upstream.as_deref());
+        let app = server::build_router(&cfg, ui.clone());
 
         tokio::spawn({
             let cfg = cfg.clone();
@@ -311,11 +278,9 @@ where
     tokio::select! {
         result = &mut serving => result,
         _ = shutdown_rx.changed() => {
-            // Graceful shutdown waits for in-flight requests to finish, and a
-            // host pulling a large NAR can hold one open far longer than a
-            // container stop allows. Give stragglers a moment, then cancel the
-            // server and return, which drops `_cache_service` so nix-serve is
-            // reaped here instead of by a SIGKILL that would leave it orphaned.
+            // Graceful shutdown waits for in-flight requests to finish, then
+            // gives any stragglers a moment before closing the listener so a
+            // container stop doesn't cut a response off mid-flight.
             if tokio::time::timeout(grace, &mut serving).await.is_err() {
                 log::warn!("requests still in flight after {grace:?}; closing connections");
             }
@@ -324,13 +289,12 @@ where
     }
 }
 
-/// How long `serve` lets in-flight requests (NAR downloads included) drain
-/// after a shutdown signal before closing the listener.
+/// How long `serve` lets in-flight requests drain after a shutdown signal
+/// before closing the listener.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
-/// Resolve on SIGINT/SIGTERM so `serve` exits its normal path and stops its
-/// nix-serve child. A hard kill would skip destructors; `PR_SET_PDEATHSIG` on
-/// the child covers that case.
+/// Resolve on SIGINT/SIGTERM so `serve` exits its normal path and drains
+/// in-flight requests before stopping.
 async fn shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
     let mut term = match signal(SignalKind::terminate()) {
