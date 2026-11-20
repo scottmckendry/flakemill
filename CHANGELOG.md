@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/scottmckendry/flakemill/compare/v0.5.0...v0.5.1) (2026-11-20)
+
+
+### Code Refactoring
+
+* drop local cache serving ([3cae8de](https://github.com/scottmckendry/flakemill/commit/3cae8de3049901a42963b9f628fa662f5517d985))
+
 ## [0.5.0](https://github.com/scottmckendry/flakemill/compare/v0.4.2...v0.5.0) (2026-11-19)
 
 
