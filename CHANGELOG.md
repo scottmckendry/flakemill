@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/scottmckendry/flakemill/compare/v0.5.1...v0.6.0) (2026-11-20)
+
+
+### Features
+
+* **cli:** add shell completions ([c78eac2](https://github.com/scottmckendry/flakemill/commit/c78eac27187ebe98efc5ab0afb3677d94ec85017))
+
 ## [0.5.1](https://github.com/scottmckendry/flakemill/compare/v0.5.0...v0.5.1) (2026-11-20)
 
 
