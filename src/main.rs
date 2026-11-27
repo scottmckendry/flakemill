@@ -16,6 +16,7 @@ mod client;
 mod clock;
 mod cmd;
 mod config;
+mod history;
 mod job;
 mod server;
 #[cfg(test)]
@@ -262,6 +263,14 @@ fn serve() -> Result<()> {
                             if let Err(record_err) = record_failure(&cfg.serve_dir, message, None) {
                                 log::error!("recording failed manifest: {record_err:#}");
                             }
+                        }
+                    }
+
+                    // Append this run to the persisted history (streaks).
+                    // Best-effort: a history failure never fails the run.
+                    if let Some(m) = job::read_manifest(&cfg.serve_dir) {
+                        if let Err(e) = history::record(&cfg.serve_dir, &m) {
+                            log::warn!("recording run history: {e:#}");
                         }
                     }
 
