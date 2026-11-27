@@ -1462,12 +1462,11 @@
       function logRowHtml(host) {
         const entry = openLogs.get(host);
         if (!entry) return "";
-        // Skip the full-log link when the row's duration/log cell already
-        // links to this same log right above; keep it for live/failure logs.
-        const fullLink =
-          entry.log !== hostPublishedLogs[host]
-            ? `<a href="/logs/${encodeURIComponent(entry.log)}" target="_blank" rel="noopener noreferrer">full log ↗</a>`
-            : "";
+        // Only add a full-log link when the row's duration/log cell has no
+        // link of its own; otherwise the two links sit next to each other.
+        const fullLink = hostPublishedLogs[host]
+          ? ""
+          : `<a href="/logs/${encodeURIComponent(entry.log)}" target="_blank" rel="noopener noreferrer">full log ↗</a>`;
         return `<tr class="log-row"><td colspan="6"><div class="log-head"><span class="label">log tail</span><span class="muted" data-log-host="${esc(host)}">${esc(entry.state)}</span>${fullLink}</div><pre class="log-output" data-log-host="${esc(host)}">${esc(tailText(entry.text))}</pre></td></tr>`;
       }
 
