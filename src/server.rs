@@ -1,13 +1,22 @@
 //! HTTP server exposing the published lock, signature, manifest, and UI.
 
 use std::{
+    convert::Infallible,
     io::{Read, Seek, SeekFrom},
     path::Path,
+    time::Duration,
 };
 
 use axum::{
     http::{header, StatusCode},
-    response::{IntoResponse, Response},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
+};
+use tokio_stream::{
+    wrappers::{IntervalStream, WatchStream},
+    StreamExt,
 };
 
 use crate::{
@@ -31,16 +40,17 @@ fn serve_file(dir: &Path, name: &str, content_type: &'static str) -> Response {
 
 const TAIL_BYTES: u64 = 32 * 1024;
 
+fn read_log_tail(dir: &Path, name: &str) -> std::io::Result<String> {
+    let mut file = std::fs::File::open(dir.join(name))?;
+    let length = file.metadata()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(TAIL_BYTES)))?;
+    let mut bytes = Vec::new();
+    file.take(TAIL_BYTES).read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn serve_log_tail(dir: &Path, name: &str) -> Response {
-    let result = (|| -> std::io::Result<String> {
-        let mut file = std::fs::File::open(dir.join(name))?;
-        let length = file.metadata()?.len();
-        file.seek(SeekFrom::Start(length.saturating_sub(TAIL_BYTES)))?;
-        let mut bytes = Vec::new();
-        file.take(TAIL_BYTES).read_to_end(&mut bytes)?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
-    })();
-    match result {
+    match read_log_tail(dir, name) {
         Ok(text) => (
             [
                 (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
@@ -71,6 +81,66 @@ fn valid_log_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+/// Push a `ui.json` snapshot on connect and on every state change. A 15s
+/// heartbeat also refreshes disk-only changes (mid-run manifest writes,
+/// storage) that don't bump the in-memory revision.
+fn events_stream(
+    cfg: std::sync::Arc<Cfg>,
+    ui: UiState,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let changes = WatchStream::new(ui.subscribe()).map(|_| ());
+    let period = Duration::from_secs(15);
+    let ticks = IntervalStream::new(tokio::time::interval_at(
+        tokio::time::Instant::now() + period,
+        period,
+    ))
+    .map(|_| ());
+    let stream = changes
+        .merge(ticks)
+        .map(move |_| Ok(Event::default().data(ui_json(&ui, &cfg).to_string())));
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Stream tail updates for one build log. The log is appended by the external
+/// nix process, so poll it once a second server-side and push only changes.
+/// A final event with `done: true` is sent once the build is no longer active,
+/// then the stream ends. `text` is null when the log file is unavailable.
+fn log_events_stream(
+    dir: std::sync::Arc<std::path::PathBuf>,
+    ui: UiState,
+    name: String,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let ticks = IntervalStream::new(tokio::time::interval(Duration::from_secs(1)));
+    let stream = futures_util::stream::unfold(
+        (ticks, None::<(Option<String>, bool)>, false),
+        move |(mut ticks, prev, finished)| {
+            let dir = dir.clone();
+            let ui = ui.clone();
+            let name = name.clone();
+            async move {
+                if finished {
+                    return None;
+                }
+                loop {
+                    ticks.next().await?;
+                    let cur = (
+                        read_log_tail(&dir.join("logs"), &name).ok(),
+                        ui.is_active_log(&name),
+                    );
+                    if prev.as_ref() == Some(&cur) {
+                        continue;
+                    }
+                    let done = !cur.1;
+                    let event = Event::default()
+                        .data(serde_json::json!({ "text": cur.0, "done": done }).to_string());
+                    return Some((Ok::<_, Infallible>(event), (ticks, Some(cur), done)));
+                }
+            }
+        },
+    );
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
     let cfg = std::sync::Arc::new(cfg.clone());
     let serve_dir = std::sync::Arc::new(cfg.serve_dir.clone());
@@ -98,6 +168,35 @@ pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
                     [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
                     include_str!("ui/live-log.html"),
                 )
+            }),
+        )
+        .route(
+            "/events",
+            axum::routing::get({
+                let cfg = cfg.clone();
+                let ui = ui.clone();
+                move || {
+                    let cfg = cfg.clone();
+                    let ui = ui.clone();
+                    async move { events_stream(cfg, ui) }
+                }
+            }),
+        )
+        .route(
+            "/log-events/{host}",
+            axum::routing::get({
+                let dir = serve_dir.clone();
+                let ui = ui.clone();
+                move |path: axum::extract::Path<String>| {
+                    let dir = dir.clone();
+                    let ui = ui.clone();
+                    async move {
+                        if !valid_log_name(&path.0) {
+                            return (StatusCode::BAD_REQUEST, "bad log name\n").into_response();
+                        }
+                        log_events_stream(dir, ui, path.0).into_response()
+                    }
+                }
             }),
         )
         .route(
@@ -306,6 +405,90 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let response = app.oneshot(request("/log-tail/missing.log")).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn events_pushes_initial_snapshot_and_state_changes() {
+        let dir = TempDir::new("server-events");
+        let ui = UiState::new(&dir);
+        let app = build_router(&test_cfg(&dir), ui.clone());
+        let response = app.oneshot(request("/events")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/event-stream"
+        );
+
+        let mut body = response.into_body();
+        let frame = tokio::time::timeout(Duration::from_secs(5), body.frame())
+            .await
+            .expect("initial snapshot within 5s")
+            .unwrap()
+            .unwrap();
+        let text = String::from_utf8(frame.into_data().unwrap().to_vec()).unwrap();
+        assert!(text.starts_with("data: "), "{text}");
+        assert!(text.contains("\"running\":false"), "{text}");
+
+        ui.set_running(true);
+        let frame = tokio::time::timeout(Duration::from_secs(5), body.frame())
+            .await
+            .expect("pushed update within 5s")
+            .unwrap()
+            .unwrap();
+        let text = String::from_utf8(frame.into_data().unwrap().to_vec()).unwrap();
+        assert!(text.contains("\"running\":true"), "{text}");
+    }
+
+    async fn next_event(body: &mut axum::body::Body) -> String {
+        let frame = tokio::time::timeout(Duration::from_secs(5), body.frame())
+            .await
+            .expect("event within 5s")
+            .unwrap()
+            .unwrap();
+        String::from_utf8(frame.into_data().unwrap().to_vec()).unwrap()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn log_events_streams_changes_and_final_output() {
+        let dir = TempDir::new("server-log-events");
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        let ui = UiState::new(&dir);
+        ui.set_running(true);
+        let guard = ui.active_build_guard("eris", "eris.log");
+        let app = build_router(&test_cfg(&dir), ui.clone());
+
+        let response = app.oneshot(request("/log-events/eris.log")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/event-stream"
+        );
+        let mut body = response.into_body();
+
+        // First snapshot: log file not written yet, build still active.
+        let text = next_event(&mut body).await;
+        assert!(text.contains("\"text\":null"), "{text}");
+        assert!(text.contains("\"done\":false"), "{text}");
+
+        std::fs::write(dir.join("logs/eris.log"), b"line one\n").unwrap();
+        let text = next_event(&mut body).await;
+        assert!(text.contains("line one"), "{text}");
+        assert!(text.contains("\"done\":false"), "{text}");
+
+        // Build ends: one final event, then the stream closes.
+        drop(guard);
+        let text = next_event(&mut body).await;
+        assert!(text.contains("line one"), "{text}");
+        assert!(text.contains("\"done\":true"), "{text}");
+        assert!(body.frame().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn log_events_rejects_invalid_names() {
+        let dir = TempDir::new("server-log-events-bad");
+        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
+        let response = app.oneshot(request("/log-events/eris.txt")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

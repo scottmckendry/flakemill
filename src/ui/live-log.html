@@ -33,12 +33,28 @@
       if (host) title.textContent = `Live build log · ${host}`;
       if (log) document.getElementById("full-log").href = `/logs/${encodeURIComponent(log)}`;
 
-      async function refresh() {
-        if (!log) {
-          status.textContent = "No log specified";
-          document.getElementById("full-log").hidden = true;
-          return;
+      function show(text) {
+        const atBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 30;
+        output.textContent = text || "Waiting for output…";
+        if (atBottom) window.scrollTo(0, document.documentElement.scrollHeight);
+      }
+
+      let finished = false;
+      let pollTimer = null;
+      let es = null;
+
+      function finish() {
+        finished = true;
+        if (es) es.close();
+        if (pollTimer != null) {
+          clearInterval(pollTimer);
+          pollTimer = null;
         }
+        status.textContent = "Build no longer running · final output";
+      }
+
+      // Polling fallback, used only while the SSE stream is down or unsupported.
+      async function refresh() {
         try {
           // Check state first, then read the tail so completion includes final output.
           const stateResponse = await fetch("/ui.json", { cache: "no-store" });
@@ -46,22 +62,53 @@
           const state = await stateResponse.json();
           const response = await fetch(`/log-tail/${encodeURIComponent(log)}`, { cache: "no-store" });
           if (!response.ok) throw new Error("Log unavailable");
-          const text = await response.text();
-          const atBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 30;
-          output.textContent = text || "Waiting for output…";
-          if (atBottom) window.scrollTo(0, document.documentElement.scrollHeight);
+          show(await response.text());
           if (state.running && state.active_build?.log === log) {
-            status.textContent = "Live · updates every 2 seconds";
-            setTimeout(refresh, 2000);
+            status.textContent = "Live · polling every 2 seconds";
           } else {
-            status.textContent = "Build no longer running · final output";
+            finish();
           }
         } catch {
           status.textContent = "Connection lost or log unavailable · retrying…";
-          setTimeout(refresh, 2000);
         }
       }
-      refresh();
+      function startPolling() {
+        if (pollTimer != null || finished) return;
+        refresh();
+        pollTimer = setInterval(refresh, 2000);
+      }
+      function stopPolling() {
+        if (pollTimer != null) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      if (!log) {
+        status.textContent = "No log specified";
+        document.getElementById("full-log").hidden = true;
+      } else if (window.EventSource) {
+        es = new EventSource(`/log-events/${encodeURIComponent(log)}`);
+        es.onopen = () => stopPolling();
+        es.onmessage = (e) => {
+          let d;
+          try { d = JSON.parse(e.data); } catch { return; }
+          if (d.text == null) {
+            output.textContent = "Log unavailable";
+          } else {
+            show(d.text);
+          }
+          if (d.done) finish();
+          else status.textContent = "Live · streaming";
+        };
+        es.onerror = () => {
+          if (finished) return;
+          status.textContent = "Connection lost · reconnecting…";
+          startPolling();
+        };
+      } else {
+        startPolling();
+      }
     </script>
   </body>
 </html>

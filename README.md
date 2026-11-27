@@ -129,8 +129,10 @@ extra-trusted-public-keys = <cache>.cachix.org-1:...
 | ------------------------- | ------------------------------------------- |
 | `GET /`                   | Read-only fleet dashboard                   |
 | `GET /ui.json`            | Dashboard data (manifest and runtime state) |
+| `GET /events`             | SSE stream of dashboard data updates        |
 | `GET /flake.lock`         | Latest published lock                       |
 | `GET /flake.lock.minisig` | Minisign signature for the lock             |
 | `GET /manifest.json`      | Last run status (revision, systems, error)  |
 | `GET /logs/{host}.log`    | Latest captured build log for a host        |
+| `GET /log-events/{host}`  | SSE stream of build log tail updates        |
 | `GET /healthz`            | Liveness check                              |

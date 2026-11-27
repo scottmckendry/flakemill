@@ -29,6 +29,7 @@ pub struct ActiveBuild {
 /// so the marker always tracks the currently running build.
 pub struct ActiveBuildGuard {
     inner: Arc<Mutex<Inner>>,
+    revision: tokio::sync::watch::Sender<u64>,
 }
 
 impl Drop for ActiveBuildGuard {
@@ -37,6 +38,7 @@ impl Drop for ActiveBuildGuard {
         if let Ok(mut inner) = self.inner.lock() {
             inner.active_build = None;
         }
+        self.revision.send_modify(|r| *r += 1);
     }
 }
 
@@ -45,6 +47,9 @@ pub struct UiState {
     inner: Arc<Mutex<Inner>>,
     serve_dir: Arc<std::path::PathBuf>,
     started: Instant,
+    /// Bumped on every state change so `/events` subscribers can push a fresh
+    /// snapshot immediately instead of waiting for the next poll.
+    revision: tokio::sync::watch::Sender<u64>,
 }
 
 impl UiState {
@@ -53,11 +58,19 @@ impl UiState {
             inner: Arc::new(Mutex::new(Inner::default())),
             serve_dir: Arc::new(serve_dir.to_path_buf()),
             started: Instant::now(),
+            revision: tokio::sync::watch::channel(0).0,
         }
+    }
+
+    /// Watch channel of the state revision; changes whenever dashboard state
+    /// changes. The current value is always available (initial snapshot).
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.revision.subscribe()
     }
 
     pub fn set_running(&self, running: bool) {
         self.inner.lock().unwrap().running = running;
+        self.revision.send_modify(|r| *r += 1);
     }
 
     /// Mark `host`/`log` as the live build and return a guard that clears the
@@ -71,13 +84,22 @@ impl UiState {
             host: host.into(),
             log: log.into(),
         });
+        self.revision.send_modify(|r| *r += 1);
         ActiveBuildGuard {
             inner: Arc::clone(&self.inner),
+            revision: self.revision.clone(),
         }
+    }
+
+    /// Whether `log` belongs to the build currently in progress.
+    pub fn is_active_log(&self, log: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.running && inner.active_build.as_ref().is_some_and(|b| b.log == log)
     }
 
     pub fn set_next_run_at(&self, at: u64) {
         self.inner.lock().unwrap().next_run_at = Some(at);
+        self.revision.send_modify(|r| *r += 1);
     }
 }
 
@@ -245,6 +267,29 @@ mod tests {
         let value = ui_json(&UiState::new(&dir), &test_cfg(&dir));
         assert!(value["data_storage"]["total_bytes"].as_u64().unwrap() > 0);
         assert_eq!(value["data_path"], dir.to_str().unwrap());
+    }
+
+    #[test]
+    fn state_changes_bump_the_revision_for_subscribers() {
+        let dir = TempDir::new("ui-revision");
+        let state = UiState::new(&dir);
+        let mut rx = state.subscribe();
+        assert!(!rx.has_changed().unwrap());
+
+        state.set_running(true);
+        assert!(rx.has_changed().unwrap());
+        rx.borrow_and_update();
+
+        let guard = state.active_build_guard("eris", "eris.log");
+        assert!(rx.has_changed().unwrap());
+        rx.borrow_and_update();
+
+        drop(guard);
+        assert!(rx.has_changed().unwrap());
+        rx.borrow_and_update();
+
+        state.set_next_run_at(42);
+        assert!(rx.has_changed().unwrap());
     }
 
     #[test]
