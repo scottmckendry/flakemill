@@ -197,7 +197,7 @@
       table {
         width: 100%;
         border-collapse: collapse;
-        min-width: 38rem;
+        min-width: 46rem;
       }
       th,
       td {
@@ -269,6 +269,25 @@
       }
       .dot-idle {
         background: var(--grey);
+      }
+      /* Per-host run history: dot strip of recent attempts, oldest → newest. */
+      .streak-cell {
+        white-space: nowrap;
+      }
+      .streak-dots {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        vertical-align: middle;
+      }
+      .streak-dot {
+        display: inline-block;
+        width: 0.5em;
+        height: 0.5em;
+      }
+      /* Run where this host wasn't reached (e.g. an earlier host failed). */
+      .streak-dot.pending {
+        border: 1px solid var(--border);
       }
       .log-link {
         color: var(--cyan);
@@ -628,6 +647,7 @@
           display: block;
         }
         .fleet-table .attempt-cell,
+        .fleet-table .streak-cell,
         .fleet-table td[data-label="host"] {
           white-space: normal;
         }
@@ -772,6 +792,7 @@
             <tr>
               <th>host</th>
               <th>latest attempt</th>
+              <th title="Recent build attempts, oldest → newest">recent runs</th>
               <th title="Output from the last successful publication">
                 published output
               </th>
@@ -783,7 +804,7 @@
           </thead>
           <tbody id="systems">
             <tr>
-              <td colspan="5" class="muted">loading…</td>
+              <td colspan="6" class="muted">loading…</td>
             </tr>
           </tbody>
         </table>
@@ -1023,7 +1044,7 @@
         renderStatus(d, m, failure);
         renderSchedule(d);
         renderSource(d);
-        renderSystems(m, failure);
+        renderSystems(m, failure, d.history);
         $("data-storage-path").textContent = d.data_path || "\u2014";
         renderStorage("nix", d.nix_storage);
         renderStorage("data", d.data_storage);
@@ -1102,7 +1123,7 @@
         }
       }
 
-      function renderSystems(m, failure) {
+      function renderSystems(m, failure, history) {
         const sys = Array.from(
           new Set([
             ...(m.systems || []),
@@ -1125,6 +1146,34 @@
         };
         const outName = (o) =>
           o ? (o.split("/").pop() || "").replace(/^\w+-/, "") : "";
+        // Fewer dots on narrow screens: 20 wraps badly on a phone, but the
+        // content column still fits ~14 comfortably.
+        const STREAK_DOTS = window.matchMedia("(max-width: 720px)").matches
+          ? 14
+          : 20;
+        // Per-host run timeline from the run history (oldest → newest). A
+        // host that wasn't attempted in a run (e.g. a failure earlier in the
+        // pipeline stopped before reaching it) still gets a placeholder box,
+        // so every host's strip lines up run-for-run.
+        const runs = (history || []).slice(-STREAK_DOTS);
+        const streakCell = (s) => {
+          if (!runs.length)
+            return '<td data-label="recent runs" class="muted"><span title="No runs recorded yet">&mdash;</span></td>';
+          let wins = 0;
+          const dots = runs
+            .map((r) => {
+              const h = (r.hosts || []).find((h) => h.name === s);
+              if (!h)
+                return `<span class="streak-dot pending" title="Not attempted · ${esc(epoch(r.at))}"></span>`;
+              if (h.ok) wins++;
+              const took = h.secs > 0 ? ` · ${dur(h.secs)}` : "";
+              const label = `${h.ok ? "✓" : "✕ failed"}${took} · ${epoch(r.at)}`;
+              return `<span class="streak-dot ${h.ok ? "dot-ok" : "dot-failed"}" title="${esc(label)}"></span>`;
+            })
+            .join("");
+          const aria = `Last ${runs.length} runs, oldest to newest: ${wins} succeeded, ${runs.length - wins} not completed.`;
+          return `<td data-label="recent runs" class="streak-cell"><span><span class="streak-dots" role="img" aria-label="${esc(aria)}">${dots}</span></span></td>`;
+        };
         const attempt = (s) => {
           if (m.status === "up-to-date")
             return '<span class="muted">No build needed</span>';
@@ -1157,12 +1206,12 @@
           ? sys
               .map(
                 (s, i) =>
-                  `<tr><td data-label="host" class="value blue"><span>${esc(s)}</span></td><td data-label="latest attempt" class="attempt-cell"><span>${attempt(s)}</span></td><td data-label="published output" class="muted"><span>${
+                  `<tr><td data-label="host" class="value blue"><span>${esc(s)}</span></td><td data-label="latest attempt" class="attempt-cell"><span>${attempt(s)}</span></td>${streakCell(s)}<td data-label="published output" class="muted"><span>${
                     esc(outName(outs[i])) || "\u2014"
                   }</span></td>${buildCells(hostStats[s])}</tr>`,
               )
               .join("")
-          : '<tr><td colspan="5" class="muted">No published host details</td></tr>';
+          : '<tr><td colspan="6" class="muted">No published host details</td></tr>';
       }
 
       function tick() {

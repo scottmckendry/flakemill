@@ -227,6 +227,10 @@ pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
             file_route("manifest.json", "application/json"),
         )
         .route(
+            "/history.json",
+            file_route("history.json", "application/json"),
+        )
+        .route(
             "/log-tail/{host}",
             axum::routing::get({
                 let dir = serve_dir.clone();

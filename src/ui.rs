@@ -151,6 +151,8 @@ struct UiJson<'a> {
     nix_storage: Option<Storage>,
     data_storage: Option<Storage>,
     data_path: &'a Path,
+    /// Recent runs, oldest first (capped ring buffer from `history.json`).
+    history: Vec<crate::history::RunRecord>,
 }
 
 pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
@@ -180,6 +182,7 @@ pub fn ui_json(state: &UiState, cfg: &crate::config::Cfg) -> serde_json::Value {
         nix_storage: storage(Path::new("/nix/store")),
         data_storage: storage(&cfg.serve_dir),
         data_path: &cfg.serve_dir,
+        history: crate::history::read(&state.serve_dir),
     })
     .expect("UiJson serialization cannot fail")
 }
@@ -302,5 +305,25 @@ mod tests {
         assert_eq!(value["signed"], false);
         assert_eq!(value["running"], false);
         assert_eq!(value["next_run_at"], serde_json::Value::Null);
+        assert_eq!(value["history"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn ui_json_includes_persisted_run_history() {
+        let dir = TempDir::new("ui-history");
+        let manifest = Manifest {
+            status: Status::Ok,
+            revision: Some("abc123".into()),
+            systems: vec!["eris".into()],
+            toplevels: Vec::new(),
+            hosts: Vec::new(),
+            updated_at: "100".into(),
+            error: None,
+            failure: None,
+        };
+        crate::history::record(&dir, &manifest).unwrap();
+        let value = ui_json(&UiState::new(&dir), &test_cfg(&dir));
+        assert_eq!(value["history"][0]["at"], 100);
+        assert_eq!(value["history"][0]["status"], "ok");
     }
 }

@@ -1,5 +1,5 @@
 //! Run history: a capped ring of recent runs persisted as `history.json` in
-//! `serve_dir`. Feeds the dashboard's per-host streak strips (and, later,
+//! `serve_dir`. Feeds the dashboard's per-host history strips (and, later,
 //! duration sparklines). Recording is best-effort: a history write failure
 //! must never fail an otherwise successful update run.
 
