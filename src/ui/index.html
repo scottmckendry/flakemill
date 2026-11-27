@@ -1016,6 +1016,22 @@
 
       let nextRunAt = null;
       let running = false;
+
+      function updateTitle() {
+        const m = document.querySelector("#status");
+        const cls = m ? m.className : "";
+        let label = null;
+        if (running) {
+          label = "building\u2026";
+        } else if (cls.includes("status-failed")) {
+          label = "failed";
+        } else if (cls.includes("status-ok")) {
+          label = "ok";
+        } else if (cls.includes("status-up-to-date")) {
+          label = "up to date";
+        }
+        document.title = label ? `flakemill - ${label}` : "flakemill";
+      }
       let lastRefresh = null;
       let uptimeSample = null;
       const logLink = (name, label) =>
@@ -1048,6 +1064,7 @@
         $("data-storage-path").textContent = d.data_path || "\u2014";
         renderStorage("nix", d.nix_storage);
         renderStorage("data", d.data_storage);
+        updateTitle();
       }
 
       function renderStatus(d, m, failure) {
