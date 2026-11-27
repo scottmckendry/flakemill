@@ -241,18 +241,25 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
     // Compare the *updated* lock against the last published one. The committed
     // lock in the repo may be identical to what we published even when upstream
     // inputs have moved, so the check must run after the refresh, not before.
-    if files_equal(&lock, &published_lock) {
-        log::info!("lock unchanged after update; nothing to publish");
+    // A source-only revision change can also change the build outputs.
+    if prev.as_ref().and_then(|p| p.revision.as_deref()) == Some(rev.as_str())
+        && files_equal(&lock, &published_lock)
+    {
+        log::info!("revision and updated lock unchanged; nothing to publish");
         // Eval-only (no builds): resolve each system's toplevel store path so
         // the dashboard's top-level column stays populated even when the lock
         // hasn't changed for a long time.
         let mut toplevels = Vec::new();
         let generation = new_generation(&cfg.serve_dir)?;
+        let mut all_rooted = true;
         for (index, system) in cfg.systems.iter().enumerate() {
             let attr = toplevel_attr(system);
             let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)
                 .map_err(|e| e.context(format!("evaluating toplevel for {system}")))?;
-            root_one(work, &generation, index, &out)?;
+            if let Err(e) = root_one(work, &generation, index, &out) {
+                log::warn!("could not root {out}: {e:#}");
+                all_rooted = false;
+            }
             toplevels.push(out);
         }
         write_manifest(
@@ -276,7 +283,12 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
                 failure: None,
             },
         )?;
-        collect_after_publish(&cfg.serve_dir, work, &generation);
+        // Keep the previous roots if the new generation is incomplete.
+        if all_rooted {
+            collect_after_publish(&cfg.serve_dir, work, &generation);
+        } else if let Err(e) = std::fs::remove_dir_all(&generation) {
+            log::warn!("could not remove incomplete GC generation: {e:#}");
+        }
         return Ok(());
     }
 
