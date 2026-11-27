@@ -144,7 +144,8 @@ fn is_cache_miss(stderr: &str) -> bool {
 /// publication candidate. Older generations stay live until the new one is
 /// published; roots are registered under `/nix/var/nix/gcroots/auto`, so they
 /// survive restarts and protect closures from concurrent GC.
-fn new_generation(serve_dir: &Path) -> Result<std::path::PathBuf> {
+/// Dropping an unpublished candidate removes its roots.
+fn new_generation(serve_dir: &Path) -> Result<tempfile::TempDir> {
     let roots = serve_dir.join("gc-roots");
     std::fs::create_dir_all(&roots)?;
     let roots = roots
@@ -152,8 +153,7 @@ fn new_generation(serve_dir: &Path) -> Result<std::path::PathBuf> {
         .context("resolving GC roots directory")?;
     Ok(tempfile::Builder::new()
         .prefix("generation-")
-        .tempdir_in(&roots)?
-        .keep())
+        .tempdir_in(&roots)?)
 }
 
 /// Root a store path inside `generation` at `index`. `nix build` on a valid
@@ -256,7 +256,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
             let attr = toplevel_attr(system);
             let out = run_capture("nix", &["eval", "--raw", &format!(".#{attr}")], work)
                 .map_err(|e| e.context(format!("evaluating toplevel for {system}")))?;
-            if let Err(e) = root_one(work, &generation, index, &out) {
+            if let Err(e) = root_one(work, generation.path(), index, &out) {
                 log::warn!("could not root {out}: {e:#}");
                 all_rooted = false;
             }
@@ -285,8 +285,8 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
         )?;
         // Keep the previous roots if the new generation is incomplete.
         if all_rooted {
-            collect_after_publish(&cfg.serve_dir, work, &generation);
-        } else if let Err(e) = std::fs::remove_dir_all(&generation) {
+            collect_after_publish(&cfg.serve_dir, work, &generation.keep());
+        } else if let Err(e) = generation.close() {
             log::warn!("could not remove incomplete GC generation: {e:#}");
         }
         return Ok(());
@@ -371,7 +371,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
         let index = toplevels.len();
         toplevels.push(out.clone());
         // Root now so concurrent GC can't collect it while later systems build.
-        root_one(work, &generation, index, &out)?;
+        root_one(work, generation.path(), index, &out)?;
     }
 
     // 4. Push to cachix ---------------------------------------------------------
@@ -416,7 +416,7 @@ pub fn run_job(cfg: &Cfg, ui: &crate::ui::UiState) -> Result<()> {
             failure: None,
         },
     )?;
-    collect_after_publish(&cfg.serve_dir, work, &generation);
+    collect_after_publish(&cfg.serve_dir, work, &generation.keep());
     Ok(())
 }
 
