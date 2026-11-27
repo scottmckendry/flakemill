@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0](https://github.com/scottmckendry/flakemill/compare/v0.5.1...v0.6.0) (2026-11-27)
+
+
+### Features
+
+* **cli:** add shell completions ([c78eac2](https://github.com/scottmckendry/flakemill/commit/c78eac27187ebe98efc5ab0afb3677d94ec85017))
+* **dashboard:** dynamic page title ([a0f3dc0](https://github.com/scottmckendry/flakemill/commit/a0f3dc07fefcc255ec993b8c65b27bb5347d6885))
+* **dashboard:** inline log tailing ([def9a16](https://github.com/scottmckendry/flakemill/commit/def9a16a34d293154194b02faaaa5857eb03d87e))
+* **dashboard:** show recent builds status per host ([aefd4e8](https://github.com/scottmckendry/flakemill/commit/aefd4e8f386272bd9500ced5cfc86e1d6c36b2b0))
+* **dashboard:** use SSE in place of client polling ([00331aa](https://github.com/scottmckendry/flakemill/commit/00331aaa7e9c1a4b65adc96044057b73a13d6018))
+* store build/run history ([d249db4](https://github.com/scottmckendry/flakemill/commit/d249db449529cf722053191f6d5743a3e1a5a032))
+
+
+### Bug Fixes
+
+* **gc:** cleaner handling of abandoned/failed builds ([ea8c81f](https://github.com/scottmckendry/flakemill/commit/ea8c81f5c0015ac1acf7a2a0604ae4fb00e02cd4))
+* **job:** check if rev has changed before rooting ([2cacea4](https://github.com/scottmckendry/flakemill/commit/2cacea4dbbb2c3b4caeaa92490556e1b353c3ac5))
+
 ## [0.5.1](https://github.com/scottmckendry/flakemill/compare/v0.5.0...v0.5.1) (2026-11-20)
 
 
