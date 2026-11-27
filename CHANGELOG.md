@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/scottmckendry/flakemill/compare/v0.6.0...v0.6.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **dashboard:** hide duplicate log link when building ([41c79a7](https://github.com/scottmckendry/flakemill/commit/41c79a721d05653132846d6d9ec97867675474af))
+
 ## [0.6.0](https://github.com/scottmckendry/flakemill/compare/v0.5.1...v0.6.0) (2026-11-27)
 
 
