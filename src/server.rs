@@ -162,15 +162,6 @@ pub fn build_router(cfg: &Cfg, ui: UiState) -> axum::Router {
             }),
         )
         .route(
-            "/live-log",
-            axum::routing::get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-                    include_str!("ui/live-log.html"),
-                )
-            }),
-        )
-        .route(
             "/events",
             axum::routing::get({
                 let cfg = cfg.clone();
@@ -368,19 +359,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn serves_live_log_page() {
-        let dir = TempDir::new("server-live-log-page");
-        let app = build_router(&test_cfg(&dir), UiState::new(&dir));
-        let response = app.oneshot(request("/live-log")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers()[header::CONTENT_TYPE],
-            "text/html; charset=utf-8"
-        );
-        assert!(body_string(response).await.contains("Live build log"));
     }
 
     #[tokio::test]

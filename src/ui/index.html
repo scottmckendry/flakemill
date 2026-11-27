@@ -362,6 +362,68 @@
       #live-log-link:hover {
         color: var(--cyan);
       }
+      /* Inline log tails: expanding a host row reveals its latest log. */
+      .log-toggle {
+        background: none;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        text-align: left;
+      }
+      .log-toggle:hover {
+        color: var(--cyan);
+      }
+      .log-toggle:focus-visible {
+        outline: 2px solid var(--yellow);
+        outline-offset: 3px;
+      }
+      /* CSS-drawn caret: font glyphs (▸/▾) have inconsistent baseline
+         metrics, so draw a triangle and rotate it instead. */
+      .log-toggle .caret {
+        display: inline-block;
+        width: 0.4em;
+        height: 0.56em;
+        margin-right: 0.5em;
+        vertical-align: middle;
+        background: var(--cyan);
+        clip-path: polygon(0 0, 100% 50%, 0 100%);
+        transition: transform 0.15s ease;
+      }
+      .log-toggle[aria-expanded="true"] .caret {
+        transform: rotate(90deg);
+      }
+      /* Line up host names that have no expandable log with those that do. */
+      .host-plain {
+        padding-left: 0.9em;
+      }
+      .fleet-table tr.log-row td {
+        padding: 0.5rem 0.65rem 0.9rem;
+      }
+      .log-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.6rem;
+        margin-bottom: 0.35rem;
+        font-size: 0.72rem;
+      }
+      .log-head a {
+        margin-left: auto;
+      }
+      .log-output {
+        margin: 0;
+        padding: 0.6rem 0.8rem;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        font-size: 0.78rem;
+        line-height: 1.5;
+        max-height: 24rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
       #refresh-state {
         color: var(--grey);
       }
@@ -694,6 +756,7 @@
         *::before,
         *::after {
           animation: none !important;
+          transition: none !important;
           scroll-behavior: auto !important;
         }
       }
@@ -1035,7 +1098,7 @@
       let lastRefresh = null;
       let uptimeSample = null;
       const logLink = (name, label) =>
-        `<a class="failure-log" href="/logs/${encodeURIComponent(name)}">${esc(label)}</a>`;
+        `<a class="failure-log" href="/logs/${encodeURIComponent(name)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
 
       function render(d) {
         nextRunAt = d.next_run_at ? Number(d.next_run_at) : null;
@@ -1048,11 +1111,8 @@
         const activeBuild = running ? d.active_build : null;
         $("live-log-link").hidden = !activeBuild;
         if (activeBuild) {
-          const params = new URLSearchParams({
-            log: activeBuild.log,
-            host: activeBuild.host,
-          });
-          $("live-log-link").href = `/live-log?${params}`;
+          $("live-log-link").href =
+            `/logs/${encodeURIComponent(activeBuild.log)}`;
         }
 
         const m = d.manifest || {};
@@ -1060,11 +1120,12 @@
         renderStatus(d, m, failure);
         renderSchedule(d);
         renderSource(d);
-        renderSystems(m, failure, d.history);
+        renderSystems(m, failure, d.history, activeBuild);
         $("data-storage-path").textContent = d.data_path || "\u2014";
         renderStorage("nix", d.nix_storage);
         renderStorage("data", d.data_storage);
         updateTitle();
+        syncOpenLogs();
       }
 
       function renderStatus(d, m, failure) {
@@ -1140,7 +1201,7 @@
         }
       }
 
-      function renderSystems(m, failure, history) {
+      function renderSystems(m, failure, history, activeBuild) {
         const sys = Array.from(
           new Set([
             ...(m.systems || []),
@@ -1156,6 +1217,23 @@
         const outs = m.toplevels || [];
         const hostStats = {};
         (m.hosts || []).forEach((h) => (hostStats[h.name] = h));
+        // Which log backs each host's inline tail: the live build if this
+        // host is building, else its failure log, else the published log.
+        hostLogs = {};
+        hostPublishedLogs = {};
+        sys.forEach((s) => {
+          hostPublishedLogs[s] = hostStats[s]?.log || null;
+          if (activeBuild && activeBuild.host === s)
+            hostLogs[s] = { log: activeBuild.log, live: true };
+          else if (
+            m.status === "failed" &&
+            failure?.host === s &&
+            failure.log
+          )
+            hostLogs[s] = { log: failure.log, live: false };
+          else if (hostStats[s]?.log)
+            hostLogs[s] = { log: hostStats[s].log, live: false };
+        });
         const dur = (s) => {
           if (s == null) return "";
           s = Number(s);
@@ -1215,21 +1293,214 @@
               ? "Host log (outcome unknown)"
               : "Published build log";
           const detail = h.log
-            ? `<a href="/logs/${encodeURIComponent(h.log)}" aria-label="${logLabel}${duration ? `, ${duration}` : ""}" title="${logLabel}">${duration || "view log"} ↗</a>`
+            ? `<a href="/logs/${encodeURIComponent(h.log)}" target="_blank" rel="noopener noreferrer" aria-label="${logLabel}${duration ? `, ${duration}` : ""}" title="${logLabel}">${duration || "view log"} ↗</a>`
             : duration || '<span class="muted">&mdash;</span>';
           return `<td data-label="published build"><span><span class="tag tag-${action}">${action}</span></span></td><td data-label="duration / log"><span>${detail}</span></td>`;
+        };
+        const hostCell = (s) => {
+          const inner = hostLogs[s]
+            ? `<button type="button" class="log-toggle" data-host="${esc(s)}" aria-expanded="${openLogs.has(s)}" title="Show log tail"><span class="caret" aria-hidden="true"></span>${esc(s)}</button>`
+            : `<span class="host-plain">${esc(s)}</span>`;
+          return `<td data-label="host" class="value blue"><span>${inner}</span></td>`;
         };
         $("systems").innerHTML = sys.length
           ? sys
               .map(
                 (s, i) =>
-                  `<tr><td data-label="host" class="value blue"><span>${esc(s)}</span></td><td data-label="latest attempt" class="attempt-cell"><span>${attempt(s)}</span></td>${streakCell(s)}<td data-label="published output" class="muted"><span>${
+                  `<tr>${hostCell(s)}<td data-label="latest attempt" class="attempt-cell"><span>${attempt(s)}</span></td>${streakCell(s)}<td data-label="published output" class="muted"><span>${
                     esc(outName(outs[i])) || "\u2014"
-                  }</span></td>${buildCells(hostStats[s])}</tr>`,
+                  }</span></td>${buildCells(hostStats[s])}</tr>${openLogs.has(s) ? logRowHtml(s) : ""}`,
               )
               .join("")
           : '<tr><td colspan="6" class="muted">No published host details</td></tr>';
       }
+
+      // Inline log tails in the fleet table. Host rows with a log get a
+      // disclosure toggle (collapsed by default); expanding inserts a row
+      // with the last LOG_LINES lines. The actively-building host streams
+      // over SSE (polling /log-tail as a fallback); other hosts fetch the
+      // tail once. Open rows survive dashboard re-renders.
+      const LOG_LINES = 20;
+      const openLogs = new Map(); // host -> { log, live, text, state, es, poll }
+      let hostLogs = {}; // host -> { log, live } from the latest render
+      let hostPublishedLogs = {}; // host -> published log name (row's own link)
+
+      const logEls = (host) => {
+        let pre = null,
+          state = null;
+        for (const el of $("systems").querySelectorAll("[data-log-host]")) {
+          if (el.dataset.logHost !== host) continue;
+          if (el.tagName === "PRE") pre = el;
+          else state = el;
+        }
+        return { pre, state };
+      };
+
+      const tailText = (text) => {
+        const lines = (text || "").replace(/\n+$/, "").split("\n");
+        return lines.length && lines[0] !== ""
+          ? lines.slice(-LOG_LINES).join("\n")
+          : "Waiting for output\u2026";
+      };
+
+      function logShow(host, entry, text) {
+        entry.text = text;
+        const { pre } = logEls(host);
+        if (!pre) return;
+        pre.textContent = tailText(text);
+        pre.scrollTop = pre.scrollHeight;
+      }
+
+      function logState(host, entry, label) {
+        entry.state = label;
+        const { state } = logEls(host);
+        if (state) state.textContent = label;
+      }
+
+      function logStop(entry) {
+        if (entry.es) {
+          entry.es.close();
+          entry.es = null;
+        }
+        if (entry.poll != null) {
+          clearInterval(entry.poll);
+          entry.poll = null;
+        }
+      }
+
+      async function logTail(host, entry) {
+        try {
+          const r = await fetch(`/log-tail/${encodeURIComponent(entry.log)}`, {
+            cache: "no-store",
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const text = await r.text();
+          if (openLogs.get(host) !== entry) return;
+          logShow(host, entry, text);
+          if (entry.state === "loading\u2026")
+            logState(host, entry, `last ${LOG_LINES} lines`);
+        } catch {
+          if (openLogs.get(host) === entry && entry.text == null)
+            logState(host, entry, "log unavailable");
+        }
+      }
+
+      function logStream(host, entry) {
+        if (window.EventSource) {
+          const es = new EventSource(
+            `/log-events/${encodeURIComponent(entry.log)}`,
+          );
+          entry.es = es;
+          es.onopen = () => {
+            if (entry.poll != null) {
+              clearInterval(entry.poll);
+              entry.poll = null;
+            }
+            logState(host, entry, "live");
+          };
+          es.onmessage = (e) => {
+            let d;
+            try {
+              d = JSON.parse(e.data);
+            } catch {
+              return;
+            }
+            if (d.text != null) logShow(host, entry, d.text);
+            if (d.done) logFinish(host, entry);
+            else logState(host, entry, "live");
+          };
+          es.onerror = () => {
+            if (openLogs.get(host) !== entry || !entry.live) return;
+            logState(host, entry, "reconnecting\u2026");
+            if (entry.poll == null) {
+              logTail(host, entry);
+              entry.poll = setInterval(() => logTail(host, entry), 2000);
+            }
+          };
+        } else {
+          logState(host, entry, "polling");
+          logTail(host, entry);
+          entry.poll = setInterval(() => logTail(host, entry), 2000);
+        }
+      }
+
+      function logFinish(host, entry) {
+        if (!entry.live) return;
+        entry.live = false;
+        logStop(entry);
+        logTail(host, entry); // pick up the final output
+        logState(host, entry, "final output");
+      }
+
+      // Reconcile open rows with the latest dashboard state: a new log for
+      // a host (new run) restarts its tail; a finished build freezes the
+      // live tail on the final output.
+      function syncOpenLogs() {
+        for (const [host, entry] of openLogs) {
+          const info = hostLogs[host];
+          if (!info) {
+            logStop(entry);
+            openLogs.delete(host);
+            continue;
+          }
+          if (info.log !== entry.log) {
+            logStop(entry);
+            entry.log = info.log;
+            entry.text = null;
+            entry.live = info.live;
+            entry.state = info.live ? "connecting\u2026" : "loading\u2026";
+            logShow(host, entry, null);
+            logState(host, entry, entry.state);
+            if (info.live) logStream(host, entry);
+            else logTail(host, entry);
+          } else if (entry.live && !info.live) {
+            logFinish(host, entry);
+          }
+        }
+      }
+
+      function logRowHtml(host) {
+        const entry = openLogs.get(host);
+        if (!entry) return "";
+        // Skip the full-log link when the row's duration/log cell already
+        // links to this same log right above; keep it for live/failure logs.
+        const fullLink =
+          entry.log !== hostPublishedLogs[host]
+            ? `<a href="/logs/${encodeURIComponent(entry.log)}" target="_blank" rel="noopener noreferrer">full log ↗</a>`
+            : "";
+        return `<tr class="log-row"><td colspan="6"><div class="log-head"><span class="label">log tail</span><span class="muted" data-log-host="${esc(host)}">${esc(entry.state)}</span>${fullLink}</div><pre class="log-output" data-log-host="${esc(host)}">${esc(tailText(entry.text))}</pre></td></tr>`;
+      }
+
+      $("systems").addEventListener("click", (e) => {
+        const btn = e.target.closest(".log-toggle");
+        if (!btn) return;
+        const host = btn.dataset.host;
+        const row = btn.closest("tr");
+        const existing = openLogs.get(host);
+        if (existing) {
+          logStop(existing);
+          openLogs.delete(host);
+          if (row.nextElementSibling?.classList.contains("log-row"))
+            row.nextElementSibling.remove();
+          btn.setAttribute("aria-expanded", "false");
+          return;
+        }
+        const info = hostLogs[host];
+        if (!info) return;
+        const entry = {
+          log: info.log,
+          live: info.live,
+          text: null,
+          state: info.live ? "connecting\u2026" : "loading\u2026",
+          es: null,
+          poll: null,
+        };
+        openLogs.set(host, entry);
+        row.insertAdjacentHTML("afterend", logRowHtml(host));
+        btn.setAttribute("aria-expanded", "true");
+        if (info.live) logStream(host, entry);
+        else logTail(host, entry);
+      });
 
       function tick() {
         if (uptimeSample && $("uptime")) {
